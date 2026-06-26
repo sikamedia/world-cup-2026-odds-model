@@ -139,4 +139,4 @@ worst=sorted(metrics(G,V36)["rows"],key=lambda x:x[9])[:12]
 for (h_,a_,hg,ag,ph,pd,pa,pov,top,pact,new) in worst:
     tag={0:'',1:' [oos22]',2:' [oos23]',3:' [oos24]',4:' [oos25]'}[new]
     print(f"  {h_+' v '+a_:28} {hg}-{ag}  P(act)={pact*100:4.1f}%  model-top {top[0]}-{top[1]}{tag}")
-print("\n教育/分析用途,不构成投注建议。")
+print("\nEducational/analytical use only; not betting advice. / 教育/分析用途,不构成投注建议。")

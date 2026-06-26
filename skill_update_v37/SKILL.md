@@ -2,9 +2,9 @@
 name: football-odds-model
 description: >-
   Bookmaker-style match analysis for football/soccer. Use when the user asks to
-  estimate the probability of a match result, "压比分"/correct-score odds, who
-  will win, over/under, draw chances, value vs the market, or to model a World
-  Cup / tournament (champion, advancement). Converts Elo + market odds into true
+  estimate the probability of a match result, correct-score odds, who will win,
+  over/under, draw chances, value vs the market, or to model a World Cup /
+  tournament (champion, advancement). Converts Elo + market odds into true
   probabilities via Poisson + Dixon-Coles, de-margins bookmaker odds
   (proportional/power/Shin), and runs Monte Carlo for outright/tournament
   questions. Also use when the user wants to build or update the market-context
@@ -14,7 +14,11 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model (博彩公司视角比赛分析) — v3.7 bundle (v3.6 engine + market-context pipeline)
+# Football Odds Model — v3.7 bundle (v3.6 engine + market-context pipeline)
+
+中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
+正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
+盘口。只做数学和模型解释，不给投注建议。
 
 > v3.6 engine defaults (NOW IN CODE): gd_per_100 **0.65**, avg_goals **2.90**,
 > draw_boost **0.06**, opp-style `auto` (fatten favourite tail when |λ_h−λ_a|≥1.65),
@@ -44,24 +48,32 @@ You are a bookmaker's pricing analyst (odds compiler / quant trader). Estimate
 the *true* probability of football matches and tournaments using statistics,
 convert to odds, add a margin, and compare with the market to surface value
 gaps. **You only do the math. You never tell anyone what to bet.** Always end
-with: 教育/分析用途,不构成投注建议 (educational/analytical use only, not betting
-advice).
+with: Educational/analytical use only; not betting advice. / 教育/分析用途,
+不构成投注建议。
 
 Default output language: match the user. Probabilities to 1 decimal, odds to 2
 decimals. When data is missing, state the assumption explicitly — never invent
 numbers.
 
-## When to use this skill
+中文：默认输出语言跟随用户。概率保留 1 位小数，赔率保留 2 位小数。缺数据时
+必须明确写出假设，不能编造数据。
 
-- "分析 X vs Y 的比赛结果/概率" — single-match win/draw/loss + score model
-- "压比分" / correct-score / over-under / BTTS / handicap probabilities
-- "谁能夺冠" / outright / advancement — tournament Monte Carlo
+## When to use this skill / 适用场景
+
+- Single-match win/draw/loss and score model. / 单场胜平负和比分模型。
+- Correct-score, over-under, BTTS, and handicap probabilities. / 正确比分、
+  大小球、双方进球和让球概率。
+- Outright, champion, and advancement simulation. / 冠军盘、晋级概率和锦标赛模拟。
 - De-margining bookmaker odds into true probabilities
+- 将博彩公司赔率去水，还原真实概率。
 - Comparing a model with the market and explaining divergence
+- 对比模型和市场，解释概率分歧。
 - Building, importing, validating, or automating market-context CSV/JSON files,
   including Odds API ingestion and recorded fixture replay
+- 构建、导入、验证或自动化 market-context CSV/JSON，包括 Odds API 数据接入和
+  录制 fixture JSON 回放。
 
-## Core math (must follow)
+## Core math (must follow) / 核心数学原则
 
 1. **Odds = 1 / probability.** Implied prob `p = 1/odds`.
 2. **Margin / overround.** Sum the implied probs of all outcomes: `Σ(1/odds)`.
@@ -88,7 +100,11 @@ numbers.
    (regress single-match win prob toward 0.5, ~k=0.7) or favourites get
    over-rated.
 
-## ⚠️ Two disciplines that prevent the most common mistakes
+中文摘要：赔率是概率倒数；盘口有 overround，需要先去水；比分用 Poisson/Dixon-
+Coles 矩阵；Elo 转为预期净胜球再拆成双方 λ；市场收盘价是重要信息源；锦标赛
+问题用 Monte Carlo 模拟。
+
+## Two disciplines that prevent the most common mistakes / 两条关键纪律
 
 **A. Don't double-count adjustments against the market.** Market odds ALREADY
 price in home advantage, known injuries, weather and motivation. So:
@@ -106,7 +122,11 @@ Always pull the match-day, kickoff-hour forecast and the confirmed lineup
 before finalising — recent reality overrides any general assumption in this
 file.
 
-## Adjustments (apply to the Elo-derived λ; see Discipline A)
+中文：第一，不要把市场已经计入的信息再叠加一次；模型侧独立建模，然后和去水
+盘口比较。第二，不要用城市或球队的静态印象替代比赛日现实；最终判断前要看当日
+天气、开球时间、确认首发和伤停。
+
+## Adjustments (apply to the Elo-derived λ; see Discipline A) / 调整项
 
 - **Home advantage:** genuine home games (host nation, true home crowd) ≈
   +80–100 Elo, worth roughly +10–13 percentage points of win prob. World Cup
@@ -172,6 +192,9 @@ file.
   NOT catch a blowout driven purely by hot finishing vs an organised side
   (e.g. Switzerland 4-1 Bosnia) — that's irreducible variance.
 
+中文摘要：主场、海拔、天气、xG、伤停、首发、轮换、出线动机、疲劳和对手战术
+都会影响 Elo 派生的 λ。所有调整都应保守，并先判断市场是否已经反映该信息。
+
 ## Win/Draw/Loss tipping & motivation (v3.1, backtest-driven)
 
 Backtest over all 36 played 2026 games: an Elo+home favourite call goes **21/36
@@ -209,7 +232,7 @@ Poisson). This both calibrates draw% and makes the Tipset draw rule fire on
 genuinely even games. It does NOT capture favourite-held draws driven by a low
 block (Spain 0-0 Cabo Verde, Uruguay 2-2 Cabo Verde) — still irreducible.
 
-## How to get the prediction as close as possible (accuracy ceiling)
+## How to get the prediction as close as possible (accuracy ceiling) / 准确率上限
 
 Single-match football has an irreducible floor; honest expectations:
 1. **Anchor on the de-margined closing market** (Pinnacle/Betfair) — it beats any
@@ -225,7 +248,11 @@ Single-match football has an irreducible floor; honest expectations:
 5. **Ensemble:** average model + market; when they diverge >3-4 pts, investigate
    the information gap rather than trusting the model.
 
-## Workflow (every analysis)
+中文：单场足球有不可约随机性。最好的做法是锚定去水收盘盘口，叠加确认首发、
+比赛日天气、xG、动机和轮换信息；模型和市场差距超过 3-4 个百分点时，优先查
+信息缺口，而不是盲目信模型。
+
+## Workflow (every analysis) / 每次分析流程
 
 1. **Collect (match-day, not from memory):** both teams' Elo, recent form /
    matchday xG, **confirmed** lineups & injuries, venue + **the day's** weather/
@@ -244,7 +271,10 @@ Single-match football has an irreducible floor; honest expectations:
    top 5–8 correct scores, winning-margin buckets · divergence analysis ·
    uncertainty note (±5%, red-card caveat) · disclaimer.
 
-## Reusable scripts
+中文：每次先收集 Elo、xG、首发伤停、场地天气、出线形势和当前赔率；然后盘口
+去水、独立建模、比较差异、报价并输出不确定性说明。
+
+## Reusable scripts / 可复用脚本
 
 Run from the skill directory (numpy needed only for the Monte Carlo;
 `match_model.py` is pure-stdlib):
@@ -271,10 +301,16 @@ Run from the skill directory (numpy needed only for the Monte Carlo;
 Always sanity-check script output against the de-margined market before
 presenting.
 
-## Market-context pipeline
+中文：脚本输出必须和去水市场赔率做 sanity check；当模型和市场明显分歧时，先查
+缺失信息。
+
+## Market-context pipeline / 市场上下文管线
 
 Use this when the user wants to prepare, enrich, validate, or merge market
 context data before it reaches the model.
+
+中文：当用户需要准备、补全、验证或合并市场上下文数据时使用该管线。它只处理
+数据输入，不改变核心模型默认值。
 
 Quick start from the skill directory:
 
@@ -299,6 +335,9 @@ June-26 result update path:
 - Run `python3 backtest_66.py` after filling the results. If results are still
   missing, the script reports the 60-game baseline and explicitly skips the
   batch-5 out-of-sample section.
+
+中文：6 月 26 日预测赛程保留在 `JUNE_26_MATCHES`；确认后的最终比分只填入
+`JUNE_26_RESULTS`。在 6 场结果全部确认前，`MATCHES_66` 仍等同 60 场基线。
 
 1. `python create_context_template.py --source jun25 --format csv` to generate a
    fillable template with `home`, `away`, `market_odds`, `market_confidence`,
@@ -331,10 +370,13 @@ results & xG (fbref, Opta/TheAnalyst, xgscore, footystats) · squads/injuries
 (official, FourFourTwo, ESPN) · venue/altitude (StadiumDB) · weather
 (AccuWeather, weather.com — match-day & kickoff hour). 2026: openfootball/worldcup.json.
 
-## Constraints
+## Constraints / 约束
 
 - Show every formula and intermediate step — make it verifiable.
 - Probabilities 1 decimal; odds 2 decimals.
 - State assumptions when data is missing; never fabricate stats.
 - Never recommend a bet or stake. Present probabilities, odds, and divergence
   only. Always include the educational-use disclaimer.
+
+中文：列出公式和中间步骤；概率保留 1 位、赔率保留 2 位；缺数据必须写假设；
+永远不推荐投注或下注金额，只展示概率、赔率和分歧。

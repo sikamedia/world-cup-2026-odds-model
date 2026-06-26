@@ -197,7 +197,7 @@ def main() -> None:
             f"RPS {row['rps']:.4f}  method {row['market_method']}  "
             f"market_gap {_fmt_gap(row['market_gap'])}"
         )
-    print("\n教育/分析用途,不构成投注技巧。")
+    print("\nEducational/analytical use only; not betting advice. / 教育/分析用途,不构成投注建议。")
 
 
 if __name__ == "__main__":

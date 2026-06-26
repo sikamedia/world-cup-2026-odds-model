@@ -217,7 +217,7 @@ def main():
         if blended is not None:
             print(f"   blend w={args.market_weight:.2f}: {_fmt_triplet(blended)}")
         print(f"   note: {note}")
-    print("\n教育/分析用途,不构成投注建议。")
+    print("\nEducational/analytical use only; not betting advice. / 教育/分析用途,不构成投注建议。")
 
 
 if __name__ == "__main__":

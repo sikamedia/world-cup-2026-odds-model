@@ -183,7 +183,7 @@ def main() -> None:
         print(f"  style: {pred.style_note}")
         print(f"  model lean: {pred.pick}")
 
-    print("\n教育/分析用途,不构成投注建议。")
+    print("\nEducational/analytical use only; not betting advice. / 教育/分析用途,不构成投注建议。")
 
 
 if __name__ == "__main__":

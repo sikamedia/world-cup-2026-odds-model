@@ -187,10 +187,11 @@ def show_rows(title, games, cfg):
 
 if not JUNE_26_RESULTS:
     print("#" * 64)
-    print("# June-26 results are not populated yet")
+    print("# June-26 results are not populated yet / 6月26日赛果尚未填入")
     print("#" * 64)
     print("JUNE_26_RESULTS is empty. Add confirmed final scores before using this as a 66-game backtest.")
-    print("Reporting the current 60-game baseline only.\n")
+    print("JUNE_26_RESULTS 为空。请先填入确认后的最终比分，再作为 66 场回测使用。")
+    print("Reporting the current 60-game baseline only. / 当前仅输出 60 场基线。\n")
 
 print("#" * 64)
 print(f"# PART 1 — v3.5 / v3.6 / candidate v3.7A on {len(MATCHES_66)} played matches")
@@ -206,7 +207,7 @@ else:
     print("\n" + "#" * 64)
     print("# PART 2 — OUT-OF-SAMPLE: Jun-26 batch")
     print("#" * 64)
-    print("Skipped: no batch-5 games have been entered.")
+    print("Skipped: no batch-5 games have been entered. / 已跳过：尚未录入 batch-5 比赛。")
 
 print("\n" + "#" * 64)
 print(f"# PART 3 — sweeps on {len(MATCHES_66)} games")
@@ -242,4 +243,4 @@ for home, away, hg, ag, _ph, _pd, _pa, _pov, top, pact, batch in worst:
     tag = {0: "", 1: " [oos22]", 2: " [oos23]", 3: " [oos24]", 4: " [oos25]", 5: " [oos26]"}.get(batch, f" [batch{batch}]")
     print(f"  {home + ' v ' + away:28} {hg}-{ag}  P(act)={pact * 100:4.1f}%  model-top {top[0]}-{top[1]}{tag}")
 
-print("\n教育/分析用途,不构成投注建议。")
+print("\nEducational/analytical use only; not betting advice. / 教育/分析用途,不构成投注建议。")
