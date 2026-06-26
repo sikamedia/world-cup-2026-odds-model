@@ -1,0 +1,46 @@
+--- /sessions/magical-fervent-rubin/mnt/.claude/skills/football-odds-model/scripts/match_model.py	2026-06-25 10:38:52.119343361 +0000
++++ scripts/match_model.py	2026-06-25 10:49:09.381391974 +0000
+@@ -45,7 +45,7 @@
+ 
+ 
+ def score_matrix(lh, la, n=11, rho=-0.05, opp_style="auto", disp=5.0,
+-                 draw_boost=0.07):
++                 draw_boost=0.06):
+     """Build the score matrix. opp_style fattens ONLY the favourite's
+     (higher-lambda side's) right tail via negative binomial when "open".
+     BACKTEST FINDING: a *global* negbin swap hurts (it spreads mass off the
+@@ -100,8 +100,8 @@
+     return h, d, a, ov25, btts
+ 
+ 
+-def elo_to_lambdas(elo_h, elo_a, home_bump=0.0, avg_goals=2.85,
+-                   gd_per_100=0.55):
++def elo_to_lambdas(elo_h, elo_a, home_bump=0.0, avg_goals=2.90,
++                   gd_per_100=0.65):
+     """Convert Elo (+home advantage) into home/away expected goals."""
+     d = (elo_h + home_bump) - elo_a
+     gd = d / 100.0 * gd_per_100          # expected goal difference
+@@ -144,10 +144,10 @@
+     ap.add_argument("--rho", type=float, default=-0.05,
+                     help="Dixon-Coles rho (default -0.05)")
+     # v3.4 engine params (used when deriving lambda from --elo)
+-    ap.add_argument("--gd-per-100", type=float, default=0.55, dest="gd_per_100",
+-                    help="Elo->goal-diff slope (v3.4 default 0.55; FIX 4)")
+-    ap.add_argument("--avg-goals", type=float, default=2.85, dest="avg_goals",
+-                    help="baseline goals/game (v3.4 default 2.85; FIX 3)")
++    ap.add_argument("--gd-per-100", type=float, default=0.65, dest="gd_per_100",
++                    help="Elo->goal-diff slope (v3.6 default 0.65; FIX 4->6)")
++    ap.add_argument("--avg-goals", type=float, default=2.90, dest="avg_goals",
++                    help="baseline goals/game (v3.6 default 2.90; FIX 3->6)")
+     # --- adjustment flags (applied AFTER lambdas are set) ---
+     ap.add_argument("--heat", choices=["mild", "moderate", "severe"],
+                     help="hot/humid game: scale total goals 0.95/0.90/0.85")
+@@ -170,7 +170,7 @@
+                          "lambda (rotation/low stakes), mustwin raises it")
+     ap.add_argument("--mot-away", choices=mot, default="normal", dest="mot_away",
+                     help="away motivation (see --mot-home)")
+-    ap.add_argument("--draw-boost", type=float, default=0.07, dest="draw_boost",
++    ap.add_argument("--draw-boost", type=float, default=0.06, dest="draw_boost",
+                     help="inflate draw probability (v3.4 default 0.07; FIX 4b; "
+                          "0 = pure Poisson). Corrects Poisson's draw under-count.")
+     args = ap.parse_args()

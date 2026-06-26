@@ -1,0 +1,23 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.env
+.env.*
+*.log
+*.tmp
+tmp/
+temp/
+
+# Old local skill update bundles are kept on disk but excluded from v0.1.
+skill_update_v34/
+skill_update_v35/
+skill_update_v36/
+
+# Keep the current release bundle and installable skill artifact.
+!skill_update_v37/
+!football-odds-model.skill
