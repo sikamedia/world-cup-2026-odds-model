@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Football-odds-model backtest scaffold for the next 66-game update.
+"""72-game backtest: 66 prior group games + 6 June-27 finales (batch 6).
 
-This extends backtest_60.py once the six June-26 finals are confirmed and
-entered in worldcup_2026_data_jun26.JUNE_26_RESULTS. Until then, it reports the
-locked 60-game baseline and exits without fabricating scores.
-Educational/analytical use only — not betting advice.
+Re-confirms v3.7A (gd .65, db .06, ag 2.90) on the full group stage and runs
+the June-27 six as an out-of-sample batch. Group stage is now COMPLETE (72
+games) - this is the final group-stage calibration before the knockouts, which
+must be backtested as a SEPARATE batch (single-leg, ET/pens, higher intensity).
+Educational/analytical use only - not betting advice.
 """
 import math
 
 from worldcup_2026_data import ELO, HOME
-from worldcup_2026_data_jun26 import JUNE_26_RESULTS, MATCHES_66
+from worldcup_2026_data_jun28 import JUNE_27_RESULTS, MATCHES_72
 
 
 def pois(k, lam): return math.exp(-lam) * lam**k / math.factorial(k)
@@ -136,20 +137,10 @@ def metrics(games, cfg):
         top = max(P.items(), key=lambda x: x[1])
         rows.append((home, away, hg, ag, ph, pd, pa, pov, top[0], P[(hg, ag)], batch))
     return dict(
-        n=n,
-        acc_hada=acc_hada,
-        acc_arg3=acc_arg3,
-        acc_rule=acc_rule,
-        rps=rps / n,
-        ll=ll,
-        draws_act=draws_act,
-        draw_prob=dps / n,
-        draws_picked=draws_picked,
-        blow_act=blow_act,
-        blow_exp=blow_exp,
-        brier_ou=brier_ou / n,
-        ou_act=ou_act,
-        rows=rows,
+        n=n, acc_hada=acc_hada, acc_arg3=acc_arg3, acc_rule=acc_rule,
+        rps=rps / n, ll=ll, draws_act=draws_act, draw_prob=dps / n,
+        draws_picked=draws_picked, blow_act=blow_act, blow_exp=blow_exp,
+        brier_ou=brier_ou / n, ou_act=ou_act, rows=rows,
     )
 
 
@@ -185,62 +176,48 @@ def show_rows(title, games, cfg):
     show(title.replace("#", "").strip(), m)
 
 
-if not JUNE_26_RESULTS:
-    print("#" * 64)
-    print("# June-26 results are not populated yet / 6月26日赛果尚未填入")
-    print("#" * 64)
-    print("JUNE_26_RESULTS is empty. Add confirmed final scores before using this as a 66-game backtest.")
-    print("JUNE_26_RESULTS 为空。请先填入确认后的最终比分，再作为 66 场回测使用。")
-    print("Reporting the current 60-game baseline only. / 当前仅输出 60 场基线。\n")
-
 print("#" * 64)
-print(f"# PART 1 — v3.5 / v3.6 / candidate v3.7A on {len(MATCHES_66)} played matches")
+print(f"# PART 1 - v3.5 / v3.6 / v3.7A on {len(MATCHES_72)} played group-stage matches")
 print("#" * 64)
-show("v3.5 (gd .60, db .08, ag 2.85)", metrics(MATCHES_66, V35))
-show("v3.6 (gd .62, db .08, ag 2.90)", metrics(MATCHES_66, V36))
-show("candidate v3.7A (gd .65, db .06, ag 2.90)", metrics(MATCHES_66, V37A))
+show("v3.5 (gd .60, db .08, ag 2.85)", metrics(MATCHES_72, V35))
+show("v3.6 (gd .62, db .08, ag 2.90)", metrics(MATCHES_72, V36))
+show("v3.7A (gd .65, db .06, ag 2.90)", metrics(MATCHES_72, V37A))
 
-new6 = [g for g in MATCHES_66 if g[5] == 5]
-if new6:
-    show_rows("PART 2 — OUT-OF-SAMPLE: the 6 new Jun-26 games only (v3.7A)", new6, V37A)
-else:
-    print("\n" + "#" * 64)
-    print("# PART 2 — OUT-OF-SAMPLE: Jun-26 batch")
-    print("#" * 64)
-    print("Skipped: no batch-5 games have been entered. / 已跳过：尚未录入 batch-5 比赛。")
+new6 = [g for g in MATCHES_72 if g[5] == 6]
+show_rows("PART 2 - OUT-OF-SAMPLE: the 6 June-27 finales only (v3.7A)", new6, V37A)
 
 print("\n" + "#" * 64)
-print(f"# PART 3 — sweeps on {len(MATCHES_66)} games")
+print(f"# PART 3 - sweeps on {len(MATCHES_72)} games")
 print("#" * 64)
 print("\n[3a] gd_per_100 sweep")
 print(f"{'gd/100':>10}{'RPS':>9}{'logL':>9}{'modelDraw%':>12}{'blowExp':>9}{'argmax':>8}")
 for gd in [0.55, 0.60, 0.62, 0.65, 0.70, 0.75]:
-    c = dict(V36)
+    c = dict(V37A)
     c["gd_per_100"] = gd
-    m = metrics(MATCHES_66, c)
+    m = metrics(MATCHES_72, c)
     print(f"{gd:>10.2f}{m['rps']:>9.4f}{m['ll']:>9.2f}{m['draw_prob'] * 100:>11.1f}%{m['blow_exp']:>9.1f}{m['acc_arg3']:>6}/{m['n']}")
 
 print("\n[3b] draw_boost sweep")
 print(f"{'draw_boost':>10}{'RPS':>9}{'logL':>9}{'modelDraw%':>12}")
 for db in [0.04, 0.05, 0.06, 0.07, 0.08, 0.10]:
-    c = dict(V36)
+    c = dict(V37A)
     c["draw_boost"] = db
-    m = metrics(MATCHES_66, c)
+    m = metrics(MATCHES_72, c)
     print(f"{db:>10.2f}{m['rps']:>9.4f}{m['ll']:>9.2f}{m['draw_prob'] * 100:>11.1f}%")
 
 print("\n[3c] avg_goals sweep")
 print(f"{'avg_goals':>10}{'P(over)avg':>12}{'Brier':>9}{'RPS':>9}")
 for ag_ in [2.7, 2.8, 2.85, 2.9, 3.0, 3.1]:
-    c = dict(V36)
+    c = dict(V37A)
     c["avg_goals"] = ag_
-    m = metrics(MATCHES_66, c)
+    m = metrics(MATCHES_72, c)
     povavg = sum(row[7] for row in m["rows"]) / m["n"]
     print(f"{ag_:>10.2f}{povavg * 100:>11.1f}%{m['brier_ou']:>9.4f}{m['rps']:>9.4f}")
 
-print("\n[3d] worst-calibrated scorelines, candidate v3.7A")
-worst = sorted(metrics(MATCHES_66, V37A)["rows"], key=lambda x: x[9])[:12]
+print("\n[3d] worst-calibrated scorelines, v3.7A")
+worst = sorted(metrics(MATCHES_72, V37A)["rows"], key=lambda x: x[9])[:12]
 for home, away, hg, ag, _ph, _pd, _pa, _pov, top, pact, batch in worst:
-    tag = {0: "", 1: " [oos22]", 2: " [oos23]", 3: " [oos24]", 4: " [oos25]", 5: " [oos26]"}.get(batch, f" [batch{batch}]")
+    tag = {0: "", 1: " [oos22]", 2: " [oos23]", 3: " [oos24]", 4: " [oos25]", 5: " [oos26]", 6: " [oos27]"}.get(batch, f" [batch{batch}]")
     print(f"  {home + ' v ' + away:28} {hg}-{ag}  P(act)={pact * 100:4.1f}%  model-top {top[0]}-{top[1]}{tag}")
 
 print("\nEducational/analytical use only; not betting advice. / 教育/分析用途,不构成投注建议。")

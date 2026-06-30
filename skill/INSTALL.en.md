@@ -17,8 +17,8 @@ Only three core defaults changed from older bundles:
 | `draw_boost` | 0.07 | **0.06** | Model draw rate re-aligns with the 54-game sample. |
 | `avg_goals` | 2.85 | **2.90** | Better O/U 2.5 calibration. |
 
-The 54-game regression locks the v3.6A core: direction 33/54, RPS 0.1537,
-model draw rate 25.7%, and blowout expectation 13.3.
+The 54-game regression locks the v3.6A core: direction 34/54, RPS 0.1508,
+model draw rate 25.7%, and blowout expectation 13.2.
 
 ## Install
 
@@ -26,8 +26,8 @@ Use one of two paths:
 
 1. Import the packaged `football-odds-model.skill` artifact in your
    Codex/Claude skill UI.
-2. Copy the entire `skill_update_v37/` directory into a local skill folder named
-   `football-odds-model`.
+2. Copy the entire built `football-odds-model/` directory into a local skill
+   folder named `football-odds-model`.
 
 If you manually copy files, include:
 

@@ -2,14 +2,17 @@
 
 [English](INSTALL_SKILL.en.md) | [中文](INSTALL_SKILL.zh-CN.md)
 
-This repository includes two install formats:
+This repository ships the skill in two forms:
 
-- `football-odds-model.skill`: packaged skill artifact.
-- `skill_update_v37/`: unpacked skill source bundle.
+- `football-odds-model.skill`: packaged skill artifact (regenerate with
+  `python3 build_skill.py`).
+- `skill/`: skill-only source assets (SKILL.md, INSTALL docs, `scripts/`). The
+  active model and pipeline code lives at the repository root; `build_skill.py`
+  assembles both into the bundle.
 
 Use the packaged `.skill` file when your Codex/Claude UI supports skill import.
-Use the unpacked directory when you need to inspect files or manually copy the
-skill into a local skill directory.
+Use the build output when you need to inspect files or manually copy the skill
+into a local skill directory.
 
 ## Option 1: Packaged Skill
 
@@ -24,10 +27,14 @@ advice.
 
 ## Option 2: Manual Install
 
-Copy the contents of `skill_update_v37/` into your local skill directory under a
-folder named `football-odds-model`.
+Build the bundle, then copy it into your local skill directory:
 
-Expected source layout:
+```bash
+python3 build_skill.py        # writes dist/football-odds-model/ and the .skill
+cp -R dist/football-odds-model /path/to/your/skills/
+```
+
+Expected bundle layout:
 
 ```text
 football-odds-model/
@@ -56,7 +63,7 @@ python3 test_jun26_results_scaffold.py
 
 ## Using the Skill Scripts Directly
 
-From `skill_update_v37/`:
+From the repository root:
 
 ```bash
 python3 create_context_template.py --source jun26 --format csv --output /tmp/jun26.csv
@@ -79,9 +86,10 @@ account data.
 
 ## Updating the Skill
 
-1. Rebuild or replace `football-odds-model.skill`.
+1. Run `python3 build_skill.py` to regenerate `football-odds-model.skill`.
 2. Re-import the `.skill` artifact in the UI, or replace the manual
-   `football-odds-model/` directory with `skill_update_v37/`.
+   `football-odds-model/` directory with the freshly built
+   `dist/football-odds-model/`.
 3. Run the four checks above.
 
 ## Current Skill Version

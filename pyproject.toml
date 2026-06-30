@@ -1,0 +1,21 @@
+# Project metadata and tooling config for the World Cup 2026 odds model.
+#
+# This is a flat collection of analysis scripts, not an installable package.
+# The core model and active pipeline use only the Python standard library.
+
+[project]
+name = "world-cup-2026-odds-model"
+version = "0.1.0"
+description = "Bookmaker-style football modeling for the 2026 World Cup: Elo, Poisson/Dixon-Coles, market de-margining, and a decoupled match-context pipeline."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []  # core + pipeline are pure standard library
+
+[project.optional-dependencies]
+# Only the skill's Monte-Carlo helper (skill/scripts/tournament_mc.py) needs numpy.
+sim = ["numpy>=1.21"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = ["archive", "dist"]

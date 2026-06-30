@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 backtest_72.py)",
+      "Bash(cat)",
+      "Read(//private/tmp/claude-501/-Users-twan-Documents-Claude-Projects-world_cup_2026/3a2d5ed8-dbe5-4fb1-a48d-d503c99a1836/scratchpad/**)"
+    ]
+  }
+}

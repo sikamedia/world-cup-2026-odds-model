@@ -23,9 +23,9 @@ description: >-
 > v3.6 engine defaults (NOW IN CODE): gd_per_100 **0.65**, avg_goals **2.90**,
 > draw_boost **0.06**, opp-style `auto` (fatten favourite tail when |λ_h−λ_a|≥1.65),
 > Tipset draw gate 0.42. Validated on **54** played 2026 games (48 in-sample + 6
-> Jun-24 OUT-OF-SAMPLE): W/D/L **61%** (33/54), RPS **0.1537**, scoreline logL
-> −155.68, model draw% **25.7** vs actual 25.9, blowout 15 actual vs **13.3**
-> expected, O/U2.5 Brier **0.2502**. Beats v3.5 on every metric INCLUDING
+> Jun-24 OUT-OF-SAMPLE): W/D/L **63%** (34/54), RPS **0.1508**, scoreline logL
+> −155.58, model draw% **25.7** vs actual 25.9, blowout 15 actual vs **13.2**
+> expected, O/U2.5 Brier **0.2522**. Beats v3.5 on every metric INCLUDING
 > out-of-sample (OOS-6 RPS 0.1834→0.1758).
 > WHY v3.6 over v3.4/v3.5: as the 48-team field reached match-day 3, favourites
 > separated even more (gd slope 0.55→0.60→0.65) and decisive games pushed the
@@ -37,6 +37,25 @@ description: >-
 > already-qualified rotation, and de-margined closing odds are the real next
 > gains — not more tuning. Recent misses (South Africa 1-0 Korea, Canada 1-3
 > Switzerland) were both motivation/rotation upsets the params cannot see.
+
+> STAGE PROFILES (group vs knockout). The group "model" and the knockout "model"
+> are the SAME engine with different parameter values, picked by `--stage`:
+> - `--stage group` (default) = frozen v3.7A above (gd 0.65 / db 0.06 / ag 2.90).
+>   Regression-locked; do not change.
+> - `--stage knockout` = lower goals (`avg_goals` 2.70 — knockouts grind), plus an
+>   **advancement resolver**. A knockout has no draw: a level game after 90' goes
+>   to ET then penalties, so the draw mass is split by a near-coin-flip shootout
+>   (`pen_tilt` 0.20 Elo tilt), and the 90' win split is optionally regressed
+>   toward 0.5 for single-leg variance (`ko_regress` 0.70). Output is an
+>   **advancement probability** (`adv_home + adv_away = 1`), NOT a regressed 90'
+>   W/D/L. Drop motivation/rotation — everyone is full strength.
+> RULE: tune the knockout profile ONLY on its own batch (`backtest_ko.py` over
+> `worldcup_2026_data_ko.py`); never mix knockout games into the group-stage
+> parameter search. R32 is just 16 games — treat the knockout profile as a
+> market-anchored prior until the sample is large. `tournament_mc.py` reuses the
+> SAME group profile via `elo_to_lambdas` (no private slope), and its `ko_damp`
+> 0.72 reproduces `ko_regress 0.70 + pen_tilt 0.20` (validated: SA/Canada R32
+> gives Canada ~65% advancement both ways).
 
 > Added in this bundle: a decoupled market-context pipeline for template CSVs,
 > recorded Odds API JSON, live Odds API pulls, import/validate steps, and a
@@ -292,11 +311,25 @@ Run from the skill directory (numpy needed only for the Monte Carlo;
     PRE-MATCH read, not the result (see Blowout-tail note above).
   - `--mot-home / --mot-away {normal,through,eliminated,mustwin}` matchday-3
     motivation (qualified rotates / eliminated downs tools / must-win lifts).
+  - `--stage {group,knockout}` selects the parameter profile (default `group`).
+    `--stage knockout` lowers `avg_goals` to 2.70 and prints an **advancement**
+    block (90'→ET→penalties); tune via `--ko-regress` / `--pen-tilt`. Explicit
+    `--avg-goals` / `--gd-per-100` / `--draw-boost` still override the profile.
   Prints de-margined market, 1X2 + **Tipset pick (with draw rule)**, O/U, BTTS,
   top scorelines, fair + margin odds, total-goals / winning-margin distributions.
 - `python scripts/tournament_mc.py [--sims N] [--damp 0.72]` — Monte Carlo over
-  a 12-group + knockout config (edit embedded Elo or pass `--json`). NOTE: the
-  embedded ratings are a snapshot — refresh from eloratings.net before reuse.
+  a 12-group + knockout config (edit embedded Elo or pass `--json`). Reuses the
+  group stage profile via `elo_to_lambdas` (one source of truth). NOTE: the
+  embedded ratings are a snapshot — refresh from eloratings.net before reuse, and
+  the bracket is a random PRE-DRAW estimate — supply the fixed R32 bracket once
+  the group stage is complete for an accurate from-here forecast.
+- `python backtest_ko.py` (repo root) — knockout-only backtest over
+  `worldcup_2026_data_ko.py`, kept SEPARATE from the 72 group-stage games.
+- `python predict_r32.py` (repo root) — advancement-to-R16 table for the 16
+  fixed Round-of-32 ties. Exact (needs only the matchups, no bracket tree).
+- `python predict_bracket.py [--sims N]` (repo root) — Monte Carlo over the
+  fixed R32 bracket for R16/QF/SF/Final/Champion odds. `R32_FIXTURES` is in the
+  official FIFA bracket-tree order (Match 73-104), so the pairings are exact.
 
 Always sanity-check script output against the de-margined market before
 presenting.

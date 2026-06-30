@@ -20,13 +20,13 @@ advice, staking advice, or guaranteed predictions.
 - Structured `competition_state` support for qualified, eliminated, must-win,
   top-spot, and rotation-risk scenarios.
 - Installable Codex skill artifact: `football-odds-model.skill`.
-- Current skill source bundle: `skill_update_v37/`.
+- Skill source assets: `skill/` (run `python3 build_skill.py` to package).
 
 ## Repository Layout
 
 ```text
 .
-|-- match_model_v33.py / match_model_v34.py / match_model_v35.py
+|-- match_model_v35.py              (active core; v33/v34 archived)
 |-- model_stability.py
 |-- worldcup_2026_data.py
 |-- worldcup_2026_data_jun26.py
@@ -38,8 +38,10 @@ advice, staking advice, or guaranteed predictions.
 |-- run_context_pipeline.py
 |-- competition_state.py
 |-- market_blend.py
-|-- skill_update_v37/
+|-- skill/                          (skill-only assets)
+|-- build_skill.py                  (builds football-odds-model.skill)
 |-- football-odds-model.skill
+|-- archive/                        (frozen historical models + backtests)
 `-- test_*.py
 ```
 
@@ -47,8 +49,9 @@ Historical reports are kept in the repository for auditability. Most historical
 analysis notes are Chinese-first because they were written during live model
 iteration.
 
-Older local skill bundles (`skill_update_v34/`, `skill_update_v35/`,
-`skill_update_v36/`) are intentionally ignored in the v0.1 GitHub release.
+Superseded model engines and historical backtests now live in `archive/`. Older
+local skill bundles (`skill_update_v34/`, `skill_update_v35/`,
+`skill_update_v36/`) are kept on disk but ignored by git.
 
 ## Quick Start
 
@@ -111,9 +114,18 @@ python3 backtest_66.py
 confirmed, fill those six results in `worldcup_2026_data_jun26.py` and rerun the
 script.
 
+Superseded engines and their paired historical backtests are preserved under
+`archive/` (see `archive/README.md`).
+
 ## Validation
 
-Recommended v0.1 checks:
+Run the whole active suite at once:
+
+```bash
+./run_tests.sh
+```
+
+Or run the individual checks:
 
 ```bash
 python3 test_jun26_results_scaffold.py
@@ -121,13 +133,13 @@ python3 test_competition_state_context.py
 python3 test_context_aliases.py
 python3 test_odds_api_pipeline.py
 python3 test_context_pipeline.py
-python3 skill_update_v37/test_regression.py
+python3 skill/test_regression.py
 ```
 
 ## Skill Installation
 
 See [INSTALL_SKILL.md](INSTALL_SKILL.md) for the Codex skill installation and
-update flow.
+update flow. Rebuild the bundle with `python3 build_skill.py`.
 
 ## Status
 

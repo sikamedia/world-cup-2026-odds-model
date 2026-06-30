@@ -19,6 +19,6 @@ Educational/analytical use only; not betting advice.
 
 - [Skill installation](INSTALL_SKILL.md)
 - [Packaged skill](football-odds-model.skill)
-- [Current skill source](skill_update_v37/)
+- [Current skill source](skill/)
 - [June 26 prediction script](predict_jun26.py)
 - [66-match backtest scaffold](backtest_66.py)

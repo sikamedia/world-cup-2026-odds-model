@@ -17,13 +17,13 @@
 - 结构化 `competition_state`，用于表达已出线、已淘汰、必须赢、争小组第一和
   轮换风险。
 - 可安装的 Codex skill 包：`football-odds-model.skill`。
-- 当前 skill 源码包：`skill_update_v37/`。
+- Skill 源文件：`skill/`（运行 `python3 build_skill.py` 打包）。
 
 ## 仓库结构
 
 ```text
 .
-|-- match_model_v33.py / match_model_v34.py / match_model_v35.py
+|-- match_model_v35.py              (当前核心；v33/v34 已归档)
 |-- model_stability.py
 |-- worldcup_2026_data.py
 |-- worldcup_2026_data_jun26.py
@@ -35,16 +35,19 @@
 |-- run_context_pipeline.py
 |-- competition_state.py
 |-- market_blend.py
-|-- skill_update_v37/
+|-- skill/                          (skill 专属源文件)
+|-- build_skill.py                  (构建 football-odds-model.skill)
 |-- football-odds-model.skill
+|-- archive/                        (冻结的历史模型 + 回测)
 `-- test_*.py
 ```
 
 历史复盘报告保留在仓库中，便于追踪模型迭代过程。由于这些报告来自实时复盘，
 多数正文以中文为主。
 
-旧的本地 skill 更新包（`skill_update_v34/`、`skill_update_v35/`、
-`skill_update_v36/`）不会进入 v0.1 GitHub 发布范围。
+被取代的模型引擎和历史回测现在位于 `archive/`。旧的本地 skill 更新包
+（`skill_update_v34/`、`skill_update_v35/`、`skill_update_v36/`）保留在磁盘上，
+但被 git 忽略。
 
 ## 快速开始
 
@@ -106,9 +109,17 @@ python3 backtest_66.py
 等 6 月 26 日 6 场最终比分确认后，把赛果填入
 `worldcup_2026_data_jun26.py` 再重新运行即可。
 
+被取代的引擎及其配对的历史回测保留在 `archive/`（见 `archive/README.md`）。
+
 ## 验证
 
-建议运行以下 v0.1 检查：
+一次运行整个活跃测试套件：
+
+```bash
+./run_tests.sh
+```
+
+或单独运行各项检查：
 
 ```bash
 python3 test_jun26_results_scaffold.py
@@ -116,12 +127,13 @@ python3 test_competition_state_context.py
 python3 test_context_aliases.py
 python3 test_odds_api_pipeline.py
 python3 test_context_pipeline.py
-python3 skill_update_v37/test_regression.py
+python3 skill/test_regression.py
 ```
 
 ## Skill 安装
 
-Codex skill 的安装和更新流程见 [INSTALL_SKILL.md](INSTALL_SKILL.md)。
+Codex skill 的安装和更新流程见 [INSTALL_SKILL.md](INSTALL_SKILL.md)。用
+`python3 build_skill.py` 重新构建 skill 包。
 
 ## 当前状态
 

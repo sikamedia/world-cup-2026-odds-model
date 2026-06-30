@@ -18,6 +18,21 @@ import argparse
 import math
 
 
+# Stage profiles: the group "model" and the knockout "model" are the SAME engine
+# with different parameter values, selected by --stage. The group profile is the
+# frozen, regression-locked v3.7A config (must equal the function defaults in
+# elo_to_lambdas/score_matrix). The knockout profile is tuned in its OWN backtest
+# batch (backtest_ko.py) and adds the advancement resolver params (ko_regress,
+# pen_tilt). Lower total goals (knockouts grind), no motivation/rotation.
+STAGE_PROFILES = {
+    # FROZEN — do not change without re-running test_regression.py.
+    "group": dict(avg_goals=2.90, gd_per_100=0.65, draw_boost=0.06),
+    # PROVISIONAL — market-anchored prior; tune only on the knockout sample.
+    "knockout": dict(avg_goals=2.70, gd_per_100=0.65, draw_boost=0.06,
+                     ko_regress=0.70, pen_tilt=0.20),
+}
+
+
 def pois(k, lam):
     return math.exp(-lam) * lam ** k / math.factorial(k)
 
@@ -100,6 +115,36 @@ def summarise(P):
     return h, d, a, ov25, btts
 
 
+def advancement(P, e_home, ko_regress=0.70, pen_tilt=0.20):
+    """Knockout advancement probability from a 90-minute score matrix.
+
+    A knockout has no draw outcome: a level game after 90' goes to extra time
+    and (usually) penalties. We model the whole "draw -> ET -> pens" tail as one
+    near-coin-flip, slightly tilted toward the stronger side by `pen_tilt`
+    (shootouts are empirically close to 50/50). Optionally regress the 90' win
+    split toward 50/50 first (single-leg variance, ~k=0.7), leaving the draw
+    mass intact. Returns raw and regressed advancement for the HOME side.
+
+        e_home : Elo win expectation for home (0.5 = even). Drives the shootout
+                 tilt. Pass 0.5 when no Elo is available (pure coin-flip).
+
+    NOTE: advancement != the doc's old "regressed 90' W/D/L" — that still had a
+    draw and summed to 100. Advancement splits the draw mass via the shootout,
+    so adv_home + adv_away == 1.
+    """
+    h, d, a, _ov, _btts = summarise(P)
+    # shootout: stronger side edges the level-game coin-flip by pen_tilt
+    p_pen_home = 0.5 + (e_home - 0.5) * pen_tilt
+    adv_raw = h + d * p_pen_home
+    # variance regression on the conditional (non-draw) win split toward 0.5
+    cond_h = h / (h + a) if (h + a) > 0 else 0.5
+    cond_h_reg = 0.5 + (cond_h - 0.5) * ko_regress
+    reg_h = cond_h_reg * (h + a)
+    adv_reg = reg_h + d * p_pen_home
+    return dict(p_win90=h, p_draw90=d, p_loss90=a, p_pen_home=p_pen_home,
+                adv_raw=adv_raw, adv_reg=adv_reg)
+
+
 def elo_to_lambdas(elo_h, elo_a, home_bump=0.0, avg_goals=2.90,
                    gd_per_100=0.65):
     """Convert Elo (+home advantage) into home/away expected goals."""
@@ -143,11 +188,23 @@ def main():
                     help="margin to add when offering odds (default 0.05)")
     ap.add_argument("--rho", type=float, default=-0.05,
                     help="Dixon-Coles rho (default -0.05)")
-    # v3.4 engine params (used when deriving lambda from --elo)
-    ap.add_argument("--gd-per-100", type=float, default=0.65, dest="gd_per_100",
-                    help="Elo->goal-diff slope (v3.6 default 0.65; FIX 4->6)")
-    ap.add_argument("--avg-goals", type=float, default=2.90, dest="avg_goals",
-                    help="baseline goals/game (v3.6 default 2.90; FIX 3->6)")
+    # Stage profile: group (frozen v3.7A) or knockout (lower goals + advancement).
+    ap.add_argument("--stage", choices=["group", "knockout"], default="group",
+                    help="parameter profile (default 'group' = frozen v3.7A; "
+                         "'knockout' lowers avg_goals and prints advancement)")
+    # v3.4 engine params (used when deriving lambda from --elo). Default None ->
+    # filled from the --stage profile; an explicit flag always overrides it.
+    ap.add_argument("--gd-per-100", type=float, default=None, dest="gd_per_100",
+                    help="Elo->goal-diff slope (profile default; group 0.65)")
+    ap.add_argument("--avg-goals", type=float, default=None, dest="avg_goals",
+                    help="baseline goals/game (profile default; group 2.90, "
+                         "knockout 2.70)")
+    ap.add_argument("--ko-regress", type=float, default=None, dest="ko_regress",
+                    help="knockout variance regression k toward 0.5 (profile "
+                         "default 0.70); used by the advancement resolver")
+    ap.add_argument("--pen-tilt", type=float, default=None, dest="pen_tilt",
+                    help="shootout Elo tilt on a level game (profile default "
+                         "0.20; 0 = pure coin-flip)")
     # --- adjustment flags (applied AFTER lambdas are set) ---
     ap.add_argument("--heat", choices=["mild", "moderate", "severe"],
                     help="hot/humid game: scale total goals 0.95/0.90/0.85")
@@ -170,16 +227,31 @@ def main():
                          "lambda (rotation/low stakes), mustwin raises it")
     ap.add_argument("--mot-away", choices=mot, default="normal", dest="mot_away",
                     help="away motivation (see --mot-home)")
-    ap.add_argument("--draw-boost", type=float, default=0.06, dest="draw_boost",
-                    help="inflate draw probability (v3.4 default 0.07; FIX 4b; "
+    ap.add_argument("--draw-boost", type=float, default=None, dest="draw_boost",
+                    help="inflate draw probability (profile default 0.06; "
                          "0 = pure Poisson). Corrects Poisson's draw under-count.")
     args = ap.parse_args()
 
+    # Resolve profile defaults for any param the user did not pass explicitly.
+    prof = STAGE_PROFILES[args.stage]
+    if args.avg_goals is None:
+        args.avg_goals = prof["avg_goals"]
+    if args.gd_per_100 is None:
+        args.gd_per_100 = prof["gd_per_100"]
+    if args.draw_boost is None:
+        args.draw_boost = prof["draw_boost"]
+    if args.ko_regress is None:
+        args.ko_regress = prof.get("ko_regress", 0.70)
+    if args.pen_tilt is None:
+        args.pen_tilt = prof.get("pen_tilt", 0.20)
+
+    e_home = 0.5  # Elo win expectation for home (for the knockout shootout tilt)
     if args.elo:
         lh, la = elo_to_lambdas(args.elo[0], args.elo[1], args.home,
                                 avg_goals=args.avg_goals,
                                 gd_per_100=args.gd_per_100)
         E = 1 / (1 + 10 ** (-((args.elo[0] + args.home) - args.elo[1]) / 400))
+        e_home = E
         print(f"Elo: home {args.elo[0]} (+{args.home}) vs away {args.elo[1]} "
               f"-> E(home, incl draw)={E:.3f}")
         print(f"Derived lambdas: home={lh:.2f}  away={la:.2f}")
@@ -246,6 +318,15 @@ def main():
     print(f"Tipset pick: {pick}")
     print(f"O/U2.5: Over {ov*100:.1f}%  Under {(1-ov)*100:.1f}%   "
           f"BTTS-Yes {btts*100:.1f}%")
+    if args.stage == "knockout":
+        adv = advancement(P, e_home, args.ko_regress, args.pen_tilt)
+        print("\nKnockout advancement (90' -> ET -> penalties):")
+        print(f"  level game shootout: home advances {adv['p_pen_home']*100:.1f}%"
+              f"  (Elo tilt {args.pen_tilt})")
+        print(f"  ADVANCE home : raw {adv['adv_raw']*100:.1f}%   "
+              f"k={args.ko_regress} regressed {adv['adv_reg']*100:.1f}%")
+        print(f"  ADVANCE away : raw {(1-adv['adv_raw'])*100:.1f}%   "
+              f"k={args.ko_regress} regressed {(1-adv['adv_reg'])*100:.1f}%")
     m = args.margin
     print(f"Fair odds  : H {1/h:.2f}  D {1/d:.2f}  A {1/a:.2f}")
     print(f"w/{int(m*100)}% margin: H {1/(h*(1+m)):.2f}  D {1/(d*(1+m)):.2f}  "

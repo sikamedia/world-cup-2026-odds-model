@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Predict the 6 unplayed June 25 2026 WC matchday-3 games.
+"""Predict the 6 June-26 2026 WC matchday-3 finales.
 
-The engine is profile-driven. Default: stable_v35. Use --profile candidate_v36
-to reproduce the 6/25 candidate from the 54-game run.
+This version uses the shared profile engine plus structured competition_state
+instead of manual MOT scaling. The default slate comes from
+worldcup_2026_data_jun27.py; a context file can override market odds, lineup
+scales, weather, or the competition state itself.
 """
 
 from __future__ import annotations
 
 import argparse
 
-from competition_state import match_adjustments, match_state_summary
+from competition_state import competition_state_payload, match_adjustments, match_state_from_motivation, match_state_summary
 from market_blend import blend_probs, effective_market_weight
 from match_context import context_key, load_context_file
-from model_stability import PROFILE_REGISTRY, STABLE_V35, predict_match, resolve_profile
-from worldcup_2026_data import JUNE_25_MATCHES
+from model_stability import CANDIDATE_V36, PROFILE_REGISTRY, STABLE_V35, predict_match, resolve_profile
+from worldcup_2026_data_jun27 import JUNE_27_COMPETITION_STATE, JUNE_27_MATCHES
 
 
 def _parse_profile(raw: str):
@@ -36,13 +38,20 @@ def _fmt_triplet(values: tuple[float, float, float]) -> str:
     return f"{values[0] * 100:.1f}% / {values[1] * 100:.1f}% / {values[2] * 100:.1f}%"
 
 
+def _default_competition_state(home: str, away: str, mot_home: str, mot_away: str):
+    key = context_key(home, away)
+    return JUNE_27_COMPETITION_STATE.get(key) or competition_state_payload(
+        match_state_from_motivation(mot_home, mot_away)
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--profile",
         type=_parse_profile,
-        default=STABLE_V35,
-        help="Model profile or alias (default: stable_v35).",
+        default=CANDIDATE_V36,
+        help="Model profile or alias (default: candidate_v36 = recommended v3.7A).",
     )
     ap.add_argument(
         "--context-file",
@@ -55,6 +64,7 @@ def main() -> None:
         help="Optional blend weight for market probabilities when context odds exist (0..1).",
     )
     args = ap.parse_args()
+
     profile = args.profile
     try:
         contexts = load_context_file(args.context_file) if args.context_file else {}
@@ -64,11 +74,11 @@ def main() -> None:
         ap.error("--market-weight must be between 0 and 1")
 
     print("=" * 78)
-    print(f"2026 WORLD CUP - June 25 predictions ({profile.name})")
+    print(f"2026 WORLD CUP - June 27 predictions ({profile.name})")
     print(f"  {profile.notes}")
     print("=" * 78)
 
-    for home, away, host_home, heat, mot_home, mot_away, ctx in JUNE_25_MATCHES:
+    for home, away, host_home, heat, mot_home, mot_away, ctx in JUNE_27_MATCHES:
         ctx_override = contexts.get(context_key(home, away))
         weather_scale = ctx_override.weather_scale if ctx_override else 1.0
         lineup_home = ctx_override.lineup_home if ctx_override else 1.0
@@ -76,17 +86,12 @@ def main() -> None:
         market_odds = ctx_override.market_odds if ctx_override else None
         market_method = ctx_override.market_method if ctx_override else "proportional"
         market_confidence = ctx_override.market_confidence if ctx_override else 1.0
-        competition_state = ctx_override.competition_state if ctx_override else None
-        effective_mot_home = mot_home
-        effective_mot_away = mot_away
-        state_lineup_home = 1.0
-        state_lineup_away = 1.0
-        if competition_state is not None:
-            state_adj = match_adjustments(competition_state)
-            effective_mot_home = state_adj["mot_home"]
-            effective_mot_away = state_adj["mot_away"]
-            state_lineup_home = state_adj["lineup_home"]
-            state_lineup_away = state_adj["lineup_away"]
+        competition_state = (
+            ctx_override.competition_state
+            if ctx_override and ctx_override.competition_state is not None
+            else _default_competition_state(home, away, mot_home, mot_away)
+        )
+        state_adj = match_adjustments(competition_state)
         pred = predict_match(
             profile,
             home,
@@ -94,8 +99,6 @@ def main() -> None:
             host_home=host_home,
             heat=heat,
             weather_scale=weather_scale,
-            mot_home=mot_home,
-            mot_away=mot_away,
             lineup_home=lineup_home,
             lineup_away=lineup_away,
             market_odds=market_odds,
@@ -107,14 +110,14 @@ def main() -> None:
             adj.append(f"heat={heat}")
         if weather_scale != 1.0:
             adj.append(f"weather_scale={weather_scale:.2f}")
-        if effective_mot_home != "normal":
-            adj.append(f"{home}={effective_mot_home}")
-        if effective_mot_away != "normal":
-            adj.append(f"{away}={effective_mot_away}")
-        if state_lineup_home != 1.0:
-            adj.append(f"{home}_state_lineup={state_lineup_home:.2f}")
-        if state_lineup_away != 1.0:
-            adj.append(f"{away}_state_lineup={state_lineup_away:.2f}")
+        if state_adj["mot_home"] != "normal":
+            adj.append(f"{home}={state_adj['mot_home']}")
+        if state_adj["mot_away"] != "normal":
+            adj.append(f"{away}={state_adj['mot_away']}")
+        if state_adj["lineup_home"] != 1.0:
+            adj.append(f"{home}_state_lineup={state_adj['lineup_home']:.2f}")
+        if state_adj["lineup_away"] != 1.0:
+            adj.append(f"{away}_state_lineup={state_adj['lineup_away']:.2f}")
         if lineup_home != 1.0:
             adj.append(f"{home}_lineup={lineup_home:.2f}")
         if lineup_away != 1.0:
@@ -127,8 +130,7 @@ def main() -> None:
         print(f"  ctx: {ctx}")
         if ctx_override and ctx_override.notes:
             print(f"  ext: {ctx_override.notes}")
-        if competition_state is not None:
-            print(f"  state: {match_state_summary(competition_state)}")
+        print(f"  state: {match_state_summary(competition_state)}")
         print(f"  adj: {', '.join(adj) if adj else 'none'}")
         print(
             f"  lambdas: {home} {pred.lambda_home:.2f}  {away} {pred.lambda_away:.2f}  "

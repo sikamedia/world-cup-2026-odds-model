@@ -15,6 +15,13 @@ import argparse
 import json
 import numpy as np
 
+# ONE source of truth for the score model: reuse the validated v3.7A group
+# profile instead of a private (stale) slope. Previously this file hardcoded
+# gd_per_100=0.35 / avg_goals=2.8 — roughly half the favourite edge of the
+# backtested engine, and never validated. Now it derives lambdas from the same
+# elo_to_lambdas the single-match model and the regression test use.
+from match_model import STAGE_PROFILES, elo_to_lambdas
+
 # (group, team, Elo) — 2026 default; replace with live ratings as needed.
 TEAMS = [
     ("A", "Mexico", 1880), ("A", "South Africa", 1720),
@@ -57,13 +64,18 @@ def run(teams, N=40000, seed=42, ko_damp=0.72):
     sf = np.zeros(len(teams)); qf = np.zeros(len(teams))
     r16 = np.zeros(len(teams)); r32 = np.zeros(len(teams))
 
+    gprof = STAGE_PROFILES["group"]
+
     def goals(ea, eb, n):
-        gd = (ea - eb) / 100.0 * 0.35
-        la = np.clip(1.4 + gd / 2, 0.18, None)
-        lb = np.clip(1.4 - gd / 2, 0.18, None)
+        la, lb = elo_to_lambdas(ea, eb, avg_goals=gprof["avg_goals"],
+                                gd_per_100=gprof["gd_per_100"])
         return rng.poisson(la, n), rng.poisson(lb, n)
 
     def ko(ia, ib, n):
+        # Advancement = single match -> ET -> penalties. We use the Elo win prob
+        # regressed toward a coin-flip (ko_damp). This is the cheap MC form of
+        # match_model.advancement(): ko_damp~0.72 reproduces ko_regress 0.70 +
+        # pen_tilt 0.20 (validated: SA/Canada R32 gives Canada ~65% both ways).
         E = 1 / (1 + 10 ** (-(elo[ia] - elo[ib]) / 400))
         E = 0.5 + (E - 0.5) * ko_damp          # regress toward coin-flip
         return np.where(rng.random(n) < E, ia, ib)
@@ -101,6 +113,11 @@ def run(teams, N=40000, seed=42, ko_damp=0.72):
         for row in arr:
             np.add.at(r32, row, 1)
 
+    # CAVEAT: bracket is randomly shuffled each sim — a valid PRE-DRAW estimate
+    # (you don't yet know who finishes where). Once the group stage is complete
+    # the R32 pairings are FIXED; for an accurate from-here forecast, replace
+    # this shuffle with the official bracket (seed qualified teams into their
+    # known slots). The 48-team best-third slotting follows FIFA's lookup table.
     cur = qual.copy()
     for n in range(N):
         rng.shuffle(cur[:, n])
@@ -119,6 +136,8 @@ def run(teams, N=40000, seed=42, ko_damp=0.72):
         np.add.at(champ, row, 1)
 
     order = np.argsort(-champ)
+    print("NOTE: pre-draw estimate (random bracket). With the group stage "
+          "complete, supply the fixed R32 bracket for an accurate forecast.")
     print(f"{'Team':<15}{'Champ':>7}{'Final':>7}{'SF':>6}{'QF':>6}"
           f"{'R16':>6}{'R32':>6}")
     for i in order[:24]:
