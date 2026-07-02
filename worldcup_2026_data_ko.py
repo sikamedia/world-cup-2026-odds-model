@@ -24,6 +24,12 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("Brazil", "Japan", 2, 1, "H", "R32"),          # Casemiro 56', Martinelli 90+5'; Sano 29'. Brazil through (NRG Houston)
     ("Germany", "Paraguay", 1, 1, "A", "R32"),      # 1-1 AET (Havertz 54', Enciso 42'); Paraguay 4-3 pens (Gillette Boston)
     ("Netherlands", "Morocco", 1, 1, "A", "R32"),   # 1-1 AET (Gakpo 72', Diop 90+1'); Morocco 3-2 pens (BBVA Monterrey)
+    ("Cote dIvoire", "Norway", 2, 1, "H", "R32"),   # CIV upset Norway; CIV through (AT&T Arlington)
+    ("France", "Sweden", 3, 1, "H", "R32"),         # France through (MetLife NJ)
+    ("Mexico", "Ecuador", 2, 0, "H", "R32"),        # Quinones 22', Jimenez 31'; Mexico through (Azteca, host+altitude)
+    ("England", "DR Congo", 2, 1, "H", "R32"),      # Cipenga 7' (COD); Kane 75',86' (both Gordon assist); Eng through (Atlanta). Saka benched.
+    ("Belgium", "Senegal", 2, 2, "H", "R32"),       # 2-2 AET (Diarra + Sarr put SEN 2-0; Lukaku 86', Tielemans 89'); Tielemans 125' pen (VAR) → BEL 3-2 AET, through (Lumen Seattle)
+    ("USA", "Bosnia", 2, 0, "H", "R32"),            # Balogun 45' then RED ~62'; Tillman 82' FK; USA 2-0 with 10 men, through (Levi's). Balogun suspended R16.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA
