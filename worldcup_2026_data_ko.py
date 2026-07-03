@@ -10,10 +10,15 @@ Row format (90-minute result):
       hg, ag    : score at the end of 90 minutes (NOT after ET/pens)
       advanced  : "H" or "A" — who actually went through (captures the
                   shootout outcome on a 90-minute draw)
-      stage     : "R32" | "R16" | "QF" | "SF" | "F"
+      stage     : "R32" | "R16" | "QF" | "SF" | "3P" | "F"
 
-Round of 32 begins 2026-06-28 (South Africa vs Canada). No knockout game has
-finished yet, so KO_RESULTS is empty — append results as they come in.
+Every row is VALIDATED at import (validate_ko_results below) — a row whose
+`advanced` contradicts the 90' score, an unknown team, a duplicate, or an R32
+pairing that doesn't match the official fixtures fails fast. Lesson from the
+6/30 ingest that recorded Cote d'Ivoire-Norway with the winner flipped. NOTE:
+the validator only catches internal inconsistency; a wrongly transcribed but
+self-consistent score still requires the double-source check (ESPN/FIFA) at
+ingest time.
 Educational/analytical use only - not betting advice.
 """
 from worldcup_2026_data import ELO, HOME  # noqa: F401  (re-exported for backtest)
@@ -58,3 +63,48 @@ R32_FIXTURES = [
     ("Switzerland", "Algeria"),      # M85  ┐R16-H┘
     ("Colombia", "Ghana"),           # M87  ┘
 ]
+
+_VALID_STAGES = {"R32", "R16", "QF", "SF", "3P", "F"}
+
+
+def validate_ko_results(rows, elo, r32_fixtures=None):
+    """Fail fast on internally inconsistent knockout rows.
+
+    Guards (per row): known teams, valid stage, non-negative integer 90'
+    score, `advanced` consistent with the score (a side that lost on goals
+    cannot be the one that advanced; only a 90' draw may go either way via
+    ET/pens), no duplicate tie per stage, and R32 rows must match an official
+    fixture in the recorded home/away order.
+    """
+    seen = set()
+    for i, row in enumerate(rows):
+        assert len(row) == 6, f"KO row {i}: expected 6 fields, got {row!r}"
+        home, away, hg, ag, advanced, stage = row
+        tag = f"KO row {i} ({home} v {away})"
+        assert home != away, f"{tag}: home == away"
+        assert home in elo, f"{tag}: unknown team {home!r} (not in ELO)"
+        assert away in elo, f"{tag}: unknown team {away!r} (not in ELO)"
+        assert isinstance(hg, int) and isinstance(ag, int) and hg >= 0 <= ag, \
+            f"{tag}: bad 90' score {hg!r}-{ag!r}"
+        assert advanced in ("H", "A"), \
+            f"{tag}: advanced must be 'H' or 'A', got {advanced!r}"
+        assert stage in _VALID_STAGES, f"{tag}: bad stage {stage!r}"
+        if hg > ag:
+            assert advanced == "H", \
+                f"{tag}: 90' score {hg}-{ag} but advanced={advanced!r} (winner flipped?)"
+        elif ag > hg:
+            assert advanced == "A", \
+                f"{tag}: 90' score {hg}-{ag} but advanced={advanced!r} (winner flipped?)"
+        key = (frozenset((home, away)), stage)
+        assert key not in seen, f"{tag}: duplicate result for stage {stage}"
+        seen.add(key)
+        if r32_fixtures is not None and stage == "R32":
+            assert (home, away) in r32_fixtures, \
+                f"{tag}: not an official R32 fixture (home/away order swapped?)"
+
+
+validate_ko_results(KO_RESULTS, ELO, R32_FIXTURES)
+
+if __name__ == "__main__":
+    print(f"KO data OK: {len(KO_RESULTS)} result(s) validated "
+          f"({len(R32_FIXTURES)} R32 fixtures)")
