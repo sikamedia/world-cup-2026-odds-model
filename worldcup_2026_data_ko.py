@@ -38,6 +38,9 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("Spain", "Austria", 3, 0, "H", "R32"),         # Spain rout; Spain through (SoFi LA). Fav advanced in 90'.
     ("Portugal", "Croatia", 2, 1, "H", "R32"),      # Portugal survive Croatia; Portugal through (BMO Toronto). Fav advanced in 90'.
     ("Switzerland", "Algeria", 2, 0, "H", "R32"),   # Switzerland 3rd straight win; Switzerland through (BC Place Vancouver). Fav advanced in 90'.
+    ("Argentina", "Cabo Verde", 1, 1, "H", "R32"),  # 90' 1-1 (Messi 29'; Duarte 59'). ET: L.Martinez 93', Lopes Cabral 104' (2-2), Borges OG -> ARG 3-2 AET, through. Near-historic upset avoided (Hard Rock Miami). Verified ESPN/Sky/CBS 7/4.
+    ("Australia", "Egypt", 1, 1, "A", "R32"),       # 90' 1-1 (Ashour 13'; Hany OG 55'). 1-1 AET -> Egypt 4-2 pens (Salah panenka; Souttar+Harrington missed). Egypt first-ever KO win (AT&T Arlington). Verified Sky/Opta/SBS 7/4.
+    ("Colombia", "Ghana", 1, 0, "H", "R32"),        # Arias 14'; Colombia through in 90' (Arrowhead KC). Fav advanced. Verified ESPN/Yahoo 7/4.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA

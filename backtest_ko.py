@@ -40,10 +40,18 @@ def rps_hda(probs, result):
     return score / 2
 
 
+def graded_k_for(eh, ea):
+    """LOCKED 2026-07-04: the knockout default is the ΔElo-graded ko_regress."""
+    return mm.graded_ko_regress(
+        eh - ea, KO["ko_regress"],
+        KO.get("ko_regress_max", KO["ko_regress"]),
+        KO.get("ko_elo_scale", 350.0))
+
+
 def predict(home, away):
     """Neutral-venue knockout prediction (no host bump, no motivation).
     Returns 90' probs, the score matrix, the Elo home win-expectation, and the
-    advancement dict at the profile's ko_regress."""
+    advancement dict at the LOCKED graded ko_regress."""
     eh, ea = ELO[home], ELO[away]
     lh, la = mm.elo_to_lambdas(eh, ea, avg_goals=KO["avg_goals"],
                                gd_per_100=KO["gd_per_100"])
@@ -51,18 +59,23 @@ def predict(home, away):
     P = mm.score_matrix(lh, la, opp_style=style, draw_boost=KO["draw_boost"])
     ph, pd, pa, _ov, _btts = mm.summarise(P)
     e_home = 1 / (1 + 10 ** (-(eh - ea) / 400))
-    adv = mm.advancement(P, e_home, KO["ko_regress"], KO["pen_tilt"])
+    adv = mm.advancement(P, e_home, graded_k_for(eh, ea), KO["pen_tilt"])
     return ph, pd, pa, P, e_home, adv
 
 
 def adv_metrics(records, k):
-    """Advancement Brier, log-loss, and expected upsets at a given ko_regress k.
+    """Advancement Brier, log-loss, and expected upsets at a given ko_regress k
+    (k=None -> the LOCKED graded rule, computed per tie from its dElo).
     Favourite/underdog are defined by Elo (k-independent), so expected-upsets is
     comparable across k and against the fixed actual count. `records` items are
-    (P, e_home, advanced)."""
+    (P, e_home, advanced, d_elo)."""
     brier = ll = exp_ups = 0.0
-    for P, e_home, advanced in records:
-        p_home = mm.advancement(P, e_home, k, KO["pen_tilt"])["adv_reg"]
+    for P, e_home, advanced, d_elo in records:
+        k_eff = k if k is not None else mm.graded_ko_regress(
+            d_elo, KO["ko_regress"],
+            KO.get("ko_regress_max", KO["ko_regress"]),
+            KO.get("ko_elo_scale", 350.0))
+        p_home = mm.advancement(P, e_home, k_eff, KO["pen_tilt"])["adv_reg"]
         o = 1.0 if advanced == "H" else 0.0
         brier += (p_home - o) ** 2
         ll += -(o * math.log(max(p_home, 1e-12))
@@ -107,7 +120,7 @@ def main():
         draws_act += r == 1
         blow_act += abs(hg - ag) >= 3
         blow_exp += sum(p for (i, j), p in P.items() if abs(i - j) >= 3)
-        records.append((P, e_home, advanced))
+        records.append((P, e_home, advanced, ELO[home] - ELO[away]))
         p_home = adv["adv_reg"]
         fav_name, fav_p = (home, p_home) if p_home >= 0.5 else (away, 1 - p_home)
         act_name = home if advanced == "H" else away
@@ -122,13 +135,16 @@ def main():
           f"(avg {ll90/n:.3f}) | dir {dir_hit}/{n} | draws {draws_act}/{n} "
           f"| blowout>=3 {blow_act} (model exp {blow_exp:.1f})")
 
-    b70, l70, e70 = adv_metrics(records, KO["ko_regress"])
-    print(f"\nADVANCEMENT (k={KO['ko_regress']}):  called-right {adv_hit}/{n}  |  "
-          f"Brier {b70:.4f}  |  log-loss {l70:.4f}")
-    print(f"  upsets: actual {act_ups}  vs  model-expected {e70:.2f}")
+    bg, lg, eg = adv_metrics(records, None)   # LOCKED graded default
+    print(f"\nADVANCEMENT (LOCKED graded k {KO['ko_regress']}->"
+          f"{KO.get('ko_regress_max', KO['ko_regress'])}"
+          f"/{KO.get('ko_elo_scale', 350.0):.0f}):  called-right {adv_hit}/{n}"
+          f"  |  Brier {bg:.4f}  |  log-loss {lg:.4f}")
+    print(f"  upsets: actual {act_ups}  vs  model-expected {eg:.2f}")
 
     ks = [0.60, 0.70, 0.85, 1.00]
-    print(f"\nk-sensitivity (advancement; n={n} — DIRECTION ONLY, not a refit):")
+    print(f"\nk-sensitivity (advancement; n={n} — MONITORING ONLY, the graded "
+          f"default above is locked):")
     print(f"  {'k':>5}{'Brier':>9}{'logLoss':>9}{'expUps':>9}   (actual ups {act_ups})")
     briers = {}
     for k in ks:
@@ -136,6 +152,7 @@ def main():
         briers[k] = b
         print(f"  {k:>5.2f}{b:>9.4f}{l:>9.4f}{e:>9.2f}")
     best_k = min(briers, key=briers.get)
+    e70 = adv_metrics(records, 0.70)[2]
 
     print("\nVERDICT:")
     tone = "MORE" if act_ups > e70 else ("LESS" if act_ups < e70 else "as")

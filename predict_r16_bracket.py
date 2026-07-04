@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Knockout bracket Monte Carlo from the FIXED Round-of-32 ties.
+"""Knockout bracket Monte Carlo from the KNOWN Round-of-16 field (R32 done).
 
-Starts from the 16 known R32 matchups (no group simulation, no random
-qualification) and plays out the single-elimination bracket, resolving every
-tie with the validated knockout advancement (90' Poisson+DC -> ET/penalties,
-match_model.advancement). Reports R16 / QF / SF / Final / Champion probabilities.
+All 16 R32 ties are decided (7/3), so the R16 pairings are fixed by the FIFA
+bracket tree (Match 89-104). This conditions on the actual qualifiers instead
+of simulating the R32 (predict_bracket.py). Ties resolve with the LOCKED
+2026-07-04 graded ko_regress advancement (see match_model.STAGE_PROFILES).
 
-R32_FIXTURES is in OFFICIAL bracket-tree leaf order (FIFA Match 73-104), so
-pairing winners in list order — (tie1,tie2) -> R16, (tie3,tie4) -> R16, ... —
-reproduces the exact tree: top half = ties 1-8, bottom half = ties 9-16. No
-shuffle. (Spain & Portugal meet in R16; Argentina & Brazil are in the same
-bottom half and can only meet from the SF.)
+R16 list order below reproduces the official tree with adjacent pairing:
+  QF M97=(A,B)  M98=(E,F)  M99=(C,D)  M100=(G,H)
+  SF M101=(W97,W98)   M102=(W99,W100)
 
-Run:  python3 predict_bracket.py [--sims N]
+Run:  python3 predict_r16_bracket.py [--sims N]
 Educational/analytical use only - not betting advice.
 """
 import argparse
@@ -23,14 +21,26 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "skill", "scripts"))
 import match_model as mm  # noqa: E402
 
-from worldcup_2026_data_ko import ELO, R32_FIXTURES  # noqa: E402
+from worldcup_2026_data_ko import ELO  # noqa: E402
 
 KO = mm.STAGE_PROFILES["knockout"]
 _cache: dict[tuple[str, str], float] = {}
 
+# Actual R16 field (winners of M73-M88), in bracket-tree leaf order A..H.
+R16_FIXTURES = [
+    ("Paraguay", "France"),        # M89  R16-A ┐QF M97
+    ("Canada", "Morocco"),         # M90  R16-B ┘        ┐SF M101
+    ("Portugal", "Spain"),         # R16-E ┐QF M98       │
+    ("USA", "Belgium"),            # R16-F ┘
+    ("Brazil", "Norway"),          # R16-C ┐QF M99
+    ("Mexico", "England"),         # R16-D ┘        ┐SF M102
+    ("Argentina", "Egypt"),        # R16-G ┐QF M100 │
+    ("Switzerland", "Colombia"),   # R16-H ┘
+]
+
 
 def p_advance(a, b):
-    """P(team a beats team b in a knockout tie), with caching (symmetric)."""
+    """P(team a beats team b in a knockout tie), cached, graded ko_regress."""
     if (a, b) in _cache:
         return _cache[(a, b)]
     ea, eb = ELO[a], ELO[b]
@@ -39,7 +49,6 @@ def p_advance(a, b):
     style = "open" if abs(ea - eb) >= 266 else "balanced"
     P = mm.score_matrix(lh, la, opp_style=style, draw_boost=KO["draw_boost"])
     e_home = 1 / (1 + 10 ** (-(ea - eb) / 400))
-    # LOCKED 2026-07-04: ΔElo-graded ko_regress (was flat KO["ko_regress"]).
     k_eff = mm.graded_ko_regress(ea - eb, KO["ko_regress"],
                                  KO.get("ko_regress_max", KO["ko_regress"]),
                                  KO.get("ko_elo_scale", 350.0))
@@ -56,8 +65,8 @@ def main():
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
-    teams = [t for tie in R32_FIXTURES for t in tie]  # 32 in bracket order
-    rounds = ["R16", "QF", "SF", "Final", "Champion"]
+    teams = [t for tie in R16_FIXTURES for t in tie]  # 16 in bracket order
+    rounds = ["QF", "SF", "Final", "Champion"]
     tally = {t: {r: 0 for r in rounds} for t in teams}
 
     for _ in range(args.sims):
@@ -73,13 +82,13 @@ def main():
 
     N = args.sims
     order = sorted(teams, key=lambda t: -tally[t]["Champion"])
-    print(f"KNOCKOUT BRACKET from fixed R32 ({N} sims, knockout profile)")
-    print("Official FIFA bracket tree (Match 73-104) — exact pairings, no shuffle.")
-    print(f"\n{'Team':16}{'Champ':>7}{'Final':>7}{'SF':>6}{'QF':>6}{'R16':>6}")
+    print(f"BRACKET from KNOWN R16 field ({N} sims, LOCKED graded ko_regress)")
+    print("QF=(A,B)(E,F)(C,D)(G,H); SF=(97,98)(99,100) — official FIFA tree.")
+    print(f"\n{'Team':16}{'Champ':>7}{'Final':>7}{'SF':>6}{'QF':>6}")
     for t in order:
         x = tally[t]
         print(f"{t:16}{x['Champion']/N*100:6.1f}%{x['Final']/N*100:6.1f}%"
-              f"{x['SF']/N*100:5.1f}%{x['QF']/N*100:5.1f}%{x['R16']/N*100:5.1f}%")
+              f"{x['SF']/N*100:5.1f}%{x['QF']/N*100:5.1f}%")
     print("\nEducational/analytical use only; not betting advice.")
 
 

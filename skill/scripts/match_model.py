@@ -27,10 +27,29 @@ import math
 STAGE_PROFILES = {
     # FROZEN — do not change without re-running test_regression.py.
     "group": dict(avg_goals=2.90, gd_per_100=0.65, draw_boost=0.06),
-    # PROVISIONAL — market-anchored prior; tune only on the knockout sample.
+    # LOCKED 2026-07-04 (pre-registered 7/3, confirmed on the FULL R32 n=16):
+    # ΔElo-GRADED ko_regress k_eff = k_min + (k_max-k_min)*min(1,|dElo|/scale).
+    # n=16 advancement Brier: graded(0.70->1.00/350) 0.1733 vs flat 0.70 0.1808.
+    # All 3 R32 upsets were penalty-shootout deaths after 90' draws (Ger d230,
+    # Ned d110, Aus d92) — ZERO regulation upsets; every dElo>=232 favourite
+    # advanced. Graded k trusts the 90' split for blowout gaps and keeps the
+    # variance cushion at coin-flips, exactly where the upsets actually lived.
+    # (flat 1.00 scored 0.1699 on this sample but throws the cushion away —
+    # rejected: Argentina d495 was 1-1 at 90' and needed ET, the cushion is real.)
     "knockout": dict(avg_goals=2.70, gd_per_100=0.65, draw_boost=0.06,
-                     ko_regress=0.70, pen_tilt=0.20),
+                     ko_regress=0.70, ko_regress_max=1.00, ko_elo_scale=350.0,
+                     pen_tilt=0.20),
 }
+
+
+def graded_ko_regress(d_elo, k_min=0.70, k_max=1.00, scale=350.0):
+    """ΔElo-graded knockout win-split regression (LOCKED 2026-07-04, n=16 R32).
+
+    k_eff = k_min + (k_max - k_min) * min(1, |d_elo| / scale)
+    |dElo| >= scale -> ~no regression (trust the 90' split: huge favourites
+    advanced in regulation every time in the 2026 R32); |dElo| ~ 0 -> full
+    k_min cushion (coin-flips is where the shootout deaths happened)."""
+    return k_min + (k_max - k_min) * min(1.0, abs(d_elo) / scale)
 
 
 def pois(k, lam):
@@ -240,8 +259,26 @@ def main():
         args.gd_per_100 = prof["gd_per_100"]
     if args.draw_boost is None:
         args.draw_boost = prof["draw_boost"]
+    ko_graded_note = None
     if args.ko_regress is None:
         args.ko_regress = prof.get("ko_regress", 0.70)
+        # LOCKED 2026-07-04: knockout default is the ΔElo-GRADED k (needs Elo).
+        # An explicit --ko-regress always overrides; without --elo we cannot
+        # grade, so the flat k_min cushion applies (stated in the printout).
+        if args.stage == "knockout" and args.elo:
+            d_elo = (args.elo[0] + args.home) - args.elo[1]
+            args.ko_regress = graded_ko_regress(
+                d_elo, prof.get("ko_regress", 0.70),
+                prof.get("ko_regress_max", prof.get("ko_regress", 0.70)),
+                prof.get("ko_elo_scale", 350.0))
+            ko_graded_note = (f"graded k_eff={args.ko_regress:.2f} "
+                              f"(|dElo|={abs(d_elo):.0f}, "
+                              f"{prof.get('ko_regress', 0.70):.2f}->"
+                              f"{prof.get('ko_regress_max', 0.70):.2f}"
+                              f"/{prof.get('ko_elo_scale', 350.0):.0f})")
+        elif args.stage == "knockout":
+            ko_graded_note = (f"flat k={args.ko_regress:.2f} (no --elo, "
+                              f"cannot grade by dElo)")
     if args.pen_tilt is None:
         args.pen_tilt = prof.get("pen_tilt", 0.20)
 
@@ -321,12 +358,14 @@ def main():
     if args.stage == "knockout":
         adv = advancement(P, e_home, args.ko_regress, args.pen_tilt)
         print("\nKnockout advancement (90' -> ET -> penalties):")
+        if ko_graded_note:
+            print(f"  ko_regress: {ko_graded_note}")
         print(f"  level game shootout: home advances {adv['p_pen_home']*100:.1f}%"
               f"  (Elo tilt {args.pen_tilt})")
         print(f"  ADVANCE home : raw {adv['adv_raw']*100:.1f}%   "
-              f"k={args.ko_regress} regressed {adv['adv_reg']*100:.1f}%")
+              f"k={args.ko_regress:.2f} regressed {adv['adv_reg']*100:.1f}%")
         print(f"  ADVANCE away : raw {(1-adv['adv_raw'])*100:.1f}%   "
-              f"k={args.ko_regress} regressed {(1-adv['adv_reg'])*100:.1f}%")
+              f"k={args.ko_regress:.2f} regressed {(1-adv['adv_reg'])*100:.1f}%")
     m = args.margin
     print(f"Fair odds  : H {1/h:.2f}  D {1/d:.2f}  A {1/a:.2f}")
     print(f"w/{int(m*100)}% margin: H {1/(h*(1+m)):.2f}  D {1/(d*(1+m)):.2f}  "
