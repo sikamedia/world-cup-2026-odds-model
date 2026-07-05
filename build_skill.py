@@ -28,11 +28,17 @@ SKILL_DIR = REPO / "skill"
 # Active root files shipped inside the skill (model + pipeline + tests).
 # Excludes archived history (match_model_v33/v34, now under archive/) and the
 # root-only backtests (backtest_54/60) that are not part of the skill surface.
+# DELIBERATELY EXCLUDED: the paper-trading ledger suite (bet_ledger.py,
+# generate_paper_signals.py, settle_bet_ledger.py, evaluate_bet_ledger.py,
+# test_bet_ledger_pipeline.py) — the skill's constitution is "never tell
+# anyone what to bet"; the paper ledger is project-side calibration
+# infrastructure and must not ship as a skill capability.
 ROOT_PY = [
     "backtest_66.py",
     "backtest_72.py",
     "backtest_ko.py",
     "experiment_graded_k.py",
+    "fetch_elo_current.py",
     "predict_bracket.py",
     "predict_r16_bracket.py",
     "predict_r32.py",
