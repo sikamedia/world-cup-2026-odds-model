@@ -51,7 +51,18 @@ TEAMS = [
 ]
 
 
-def run(teams, N=40000, seed=42, ko_damp=0.72):
+def graded_damp(d_elo, floor=0.72, ceil=1.00, scale=350.0):
+    """MC analogue of the LOCKED graded ko_regress (0.70->1.00 over |dElo|/350).
+
+    damp 0.72 reproduces flat ko_regress 0.70 + pen_tilt 0.20; the graded form
+    keeps that buffer at dElo=0 and regresses huge favourites barely at all
+    (R32 n=16 evidence: zero 90' upsets, all 3 exits were pen-deaths of
+    small/mid favourites). Aligned with match_model.graded_ko_regress.
+    Vectorised: d_elo may be a scalar or a numpy array."""
+    return floor + (ceil - floor) * np.minimum(1.0, np.abs(d_elo) / scale)
+
+
+def run(teams, N=40000, seed=42, ko_damp=None):
     rng = np.random.default_rng(seed)
     names = [t[1] for t in teams]
     elo = np.array([t[2] for t in teams], float)
@@ -73,11 +84,13 @@ def run(teams, N=40000, seed=42, ko_damp=0.72):
 
     def ko(ia, ib, n):
         # Advancement = single match -> ET -> penalties. We use the Elo win prob
-        # regressed toward a coin-flip (ko_damp). This is the cheap MC form of
-        # match_model.advancement(): ko_damp~0.72 reproduces ko_regress 0.70 +
-        # pen_tilt 0.20 (validated: SA/Canada R32 gives Canada ~65% both ways).
+        # regressed toward a coin-flip. Default (ko_damp=None) = GRADED damp
+        # aligned with the LOCKED graded ko_regress (7/4, n=16): big favourites
+        # barely regress, coin-flips keep the full 0.72 buffer. Pass an explicit
+        # ko_damp for the legacy flat behaviour.
+        damp = graded_damp(elo[ia] - elo[ib]) if ko_damp is None else ko_damp
         E = 1 / (1 + 10 ** (-(elo[ia] - elo[ib]) / 400))
-        E = 0.5 + (E - 0.5) * ko_damp          # regress toward coin-flip
+        E = 0.5 + (E - 0.5) * damp             # regress toward coin-flip
         return np.where(rng.random(n) < E, ia, ib)
 
     grank = {}
@@ -150,8 +163,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--sims", type=int, default=40000)
     ap.add_argument("--json", help="path to [[group,team,elo],...] JSON")
-    ap.add_argument("--damp", type=float, default=0.72,
-                    help="knockout upset damping (1=pure Elo, lower=more upsets)")
+    ap.add_argument("--damp", type=float, default=None,
+                    help="flat knockout damping override (1=pure Elo, lower=more "
+                         "upsets); default None = graded 0.72->1.00 over |dElo|/350")
     a = ap.parse_args()
     teams = json.load(open(a.json)) if a.json else TEAMS
     teams = [tuple(t) for t in teams]

@@ -41,6 +41,8 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("Argentina", "Cabo Verde", 1, 1, "H", "R32"),  # 90' 1-1 (Messi 29'; Duarte 59'). ET: L.Martinez 93', Lopes Cabral 104' (2-2), Borges OG -> ARG 3-2 AET, through. Near-historic upset avoided (Hard Rock Miami). Verified ESPN/Sky/CBS 7/4.
     ("Australia", "Egypt", 1, 1, "A", "R32"),       # 90' 1-1 (Ashour 13'; Hany OG 55'). 1-1 AET -> Egypt 4-2 pens (Salah panenka; Souttar+Harrington missed). Egypt first-ever KO win (AT&T Arlington). Verified Sky/Opta/SBS 7/4.
     ("Colombia", "Ghana", 1, 0, "H", "R32"),        # Arias 14'; Colombia through in 90' (Arrowhead KC). Fav advanced. Verified ESPN/Yahoo 7/4.
+    ("Canada", "Morocco", 0, 3, "A", "R16"),        # Ounahi x2 + Rahimi 90'+; Morocco rout, through to QF (NRG Houston). Market (MAR 68.8% adv) right, stale-Elo model coin-flip (CAN 50.5%) wrong — Elo-staleness evidence #2. Verified ESPN/NBC/Outlook 7/4.
+    ("Paraguay", "France", 0, 1, "A", "R16"),       # Mbappe 70' pen (VAR, Gomez knee on Doue); 100F heat Philadelphia, feisty/bruising. France through to QF vs Morocco (Gillette 7/9). Model fav side right (FRA adv 85.6%, market 92.6%). Verified ESPN/Opta/FIFA/Sky/AlJazeera 7/5.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA

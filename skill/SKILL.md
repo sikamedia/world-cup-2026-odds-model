@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.7 bundle (v3.6 engine + market-context pipeline)
+# Football Odds Model — v3.8 bundle (graded-k knockout LOCKED + market-context pipeline)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -45,17 +45,26 @@ description: >-
 > - `--stage knockout` = lower goals (`avg_goals` 2.70 — knockouts grind), plus an
 >   **advancement resolver**. A knockout has no draw: a level game after 90' goes
 >   to ET then penalties, so the draw mass is split by a near-coin-flip shootout
->   (`pen_tilt` 0.20 Elo tilt), and the 90' win split is optionally regressed
->   toward 0.5 for single-leg variance (`ko_regress` 0.70). Output is an
->   **advancement probability** (`adv_home + adv_away = 1`), NOT a regressed 90'
->   W/D/L. Drop motivation/rotation — everyone is full strength.
+>   (`pen_tilt` 0.20 Elo tilt), and the 90' win split is regressed toward 0.5 by
+>   a **GRADED, ΔElo-dependent ko_regress (LOCKED 2026-07-04, pre-registered
+>   2026-07-03)**: `k_eff = 0.70 + 0.30 × min(1, |ΔElo|/350)`. Coin-flips keep
+>   the full variance buffer (k 0.70); crushing favourites barely regress
+>   (k→1.00). Evidence (R32 complete, n=16): advancement Brier **0.1733** vs
+>   flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all round — all 3
+>   favourite exits were pens-after-draw (Ger +230, Ned +110, Aus +92), while
+>   every ΔElo≥232 favourite advanced in 90'. Flat 1.00 scored 0.1699 but is
+>   REJECTED: it spends the whole buffer (Argentina +495 was still dragged to
+>   1-1 at 90'). Auto-graded when `--elo` is given (prints k_eff); explicit
+>   `--ko-regress` overrides; falls back to flat 0.70 without Elo input. Output
+>   is an **advancement probability** (`adv_home + adv_away = 1`), NOT a
+>   regressed 90' W/D/L. Drop motivation/rotation — everyone is full strength.
 > RULE: tune the knockout profile ONLY on its own batch (`backtest_ko.py` over
 > `worldcup_2026_data_ko.py`); never mix knockout games into the group-stage
-> parameter search. R32 is just 16 games — treat the knockout profile as a
-> market-anchored prior until the sample is large. `tournament_mc.py` reuses the
-> SAME group profile via `elo_to_lambdas` (no private slope), and its `ko_damp`
-> 0.72 reproduces `ko_regress 0.70 + pen_tilt 0.20` (validated: SA/Canada R32
-> gives Canada ~65% advancement both ways).
+> parameter search. Discipline: R16 (n→24) is MONITOR-ONLY; any further change
+> (incl. revisiting flat 1.00) must be pre-registered before testing at n=24.
+> `tournament_mc.py` reuses the SAME group profile via `elo_to_lambdas` (no
+> private slope) and its knockout damping is now graded to match
+> (`graded_damp` 0.72→1.00 over |ΔElo|/350; `--damp` forces the legacy flat).
 
 > Added in this bundle: a decoupled market-context pipeline for template CSVs,
 > recorded Odds API JSON, live Odds API pulls, import/validate steps, and a
