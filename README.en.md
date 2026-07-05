@@ -23,6 +23,8 @@ advice, staking advice, or guaranteed predictions.
   (champion / deep-run odds) seeded from the official FIFA bracket order.
 - Market-context CSV/JSON pipeline for templates, recorded Odds API fixture
   replay, import, validation, and one-command execution.
+- Paper-trading workflow for model-vs-market signals: conservative edge gates,
+  ledger append/de-duplication, settlement, and performance evaluation.
 - Structured `competition_state` support for qualified, eliminated, must-win,
   top-spot, and rotation-risk scenarios.
 - Installable Codex skill artifact: `football-odds-model.skill`.
@@ -48,6 +50,10 @@ advice, staking advice, or guaranteed predictions.
 |-- run_context_pipeline.py
 |-- competition_state.py
 |-- market_blend.py
+|-- generate_paper_signals.py      (paper-trading signal generation)
+|-- settle_bet_ledger.py           (paper ledger settlement)
+|-- evaluate_bet_ledger.py         (paper ledger performance report)
+|-- bet_ledger.py                  (shared ledger schema + risk gates)
 |-- build_skill.py                  (builds football-odds-model.skill)
 |-- football-odds-model.skill
 |-- archive/                        (frozen historical models + backtests)
@@ -119,6 +125,53 @@ export ODDS_API_SPORT_KEY="..."
 
 Do not commit API keys, `.env` files, or private recorded payloads.
 
+## Paper Trading Workflow
+
+The trading layer is **paper-only**. It records candidate model-vs-market
+signals and does not place real bets.
+
+Generate conservative signals from a context JSON:
+
+```bash
+python3 generate_paper_signals.py \
+  --context-file /tmp/jun26.merged.json \
+  --output-csv /tmp/paper_signals.csv \
+  --append-ledger paper_bet_ledger.csv \
+  --date 2026-07-05 \
+  --stage R16
+```
+
+By default, `generate_paper_signals.py` uses prediction-side current Elo from
+`elo_current_jul4.py`. Group-stage labels select `group_v37a`; knockout labels
+such as `R32`, `R16`, `QF`, `SF`, and `final` select `knockout_locked`. Use
+`--elo-source snapshot` only for historical replay, not live paper trading.
+
+Default gates:
+
+- `edge_net = p_model - p_market - 0.02`
+- `edge_net >= 0.03` to become `paper_bet`
+- max stake `0.5u`, daily paper risk `2.0u`
+- no bet when market margin is above `8%` or model/market gap is above `15pp`
+
+Settle after confirmed results:
+
+```bash
+python3 settle_bet_ledger.py \
+  --ledger-csv paper_bet_ledger.csv \
+  --results-csv confirmed_results.csv \
+  --output-csv paper_bet_ledger.settled.csv
+```
+
+Evaluate paper performance:
+
+```bash
+python3 evaluate_bet_ledger.py --ledger-csv paper_bet_ledger.settled.csv
+```
+
+Version 1 auto-generates only `h2h_90` signals. Advancement markets can be
+recorded manually in the same ledger schema until a reliable market feed is
+added.
+
 ## Backtesting
 
 Final group-stage calibration (all 72 games, v3.7A, RPS 0.1479):
@@ -155,6 +208,7 @@ python3 test_competition_state_context.py
 python3 test_context_aliases.py
 python3 test_odds_api_pipeline.py
 python3 test_context_pipeline.py
+python3 test_bet_ledger_pipeline.py
 python3 skill/test_regression.py
 ```
 

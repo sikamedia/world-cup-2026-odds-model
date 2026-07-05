@@ -108,7 +108,7 @@ def main():
     rps = ll90 = dps = 0.0
     dir_hit = draws_act = blow_act = act_ups = adv_hit = 0
     blow_exp = 0.0
-    records = []                       # (P, e_home, advanced)
+    records = []                       # (P, e_home, advanced, d_elo)
     print(f"\n{'Tie':30}{'90':>5}   model advancement -> actual")
     for home, away, hg, ag, advanced, _stage in games:
         ph, pd, pa, P, e_home, adv = predict(home, away)
@@ -162,11 +162,12 @@ def main():
     if best_k <= 0.70 or act_ups >= e70:
         print("  => k=0.70 is NOT over-regressing — the original 'favourites are "
               "under-rated' hypothesis is contradicted; if anything the data "
-              "leans to MORE regression. HOLD 0.70 (do not refit on n=7); "
-              "revisit after R16.")
+              f"leans to MORE regression. HOLD the locked graded rule "
+              f"(do not refit on n={n}); revisit after the next full round.")
     else:
         print("  => data leans to LESS regression; consider a small, provisional "
-              "nudge up, but HOLD until R16 accumulates (n too small to refit).")
+              f"nudge up, but HOLD until the next full round accumulates "
+              f"(n={n} is still too small to refit).")
     print("\nEducational/analytical use only; not betting advice.")
 
 

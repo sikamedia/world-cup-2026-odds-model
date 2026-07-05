@@ -6,9 +6,17 @@ from dataclasses import dataclass
 from itertools import product
 from random import Random
 import math
-from typing import Sequence
+from typing import Mapping, Sequence
 
-import match_model_v35 as mm
+try:
+    # Repo layout: engine lives under skill/scripts/ (namespace package).
+    from skill.scripts import match_model as mm
+except ModuleNotFoundError:
+    # Installed-bundle layout: engine ships flat at <bundle>/scripts/.
+    import os as _os
+    import sys as _sys
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "scripts"))
+    import match_model as mm
 
 from competition_state import match_adjustments
 from match_context import de_margin_odds, market_gap
@@ -75,6 +83,24 @@ CANDIDATE_V36 = ModelProfile(
     notes="Experimental candidate from the 54-game run.",
 )
 
+GROUP_V37A = ModelProfile(
+    name="group_v37a",
+    avg_goals=mm.STAGE_PROFILES["group"]["avg_goals"],
+    gd_per_100=mm.STAGE_PROFILES["group"]["gd_per_100"],
+    draw_boost=mm.STAGE_PROFILES["group"]["draw_boost"],
+    open_delo=266.0,
+    notes="Active frozen group-stage profile: v3.7A.",
+)
+
+KNOCKOUT_LOCKED = ModelProfile(
+    name="knockout_locked",
+    avg_goals=mm.STAGE_PROFILES["knockout"]["avg_goals"],
+    gd_per_100=mm.STAGE_PROFILES["knockout"]["gd_per_100"],
+    draw_boost=mm.STAGE_PROFILES["knockout"]["draw_boost"],
+    open_delo=266.0,
+    notes="Active locked knockout 90-minute profile; advancement uses the skill engine.",
+)
+
 LEGACY_V34 = ModelProfile(
     name="legacy_v34",
     avg_goals=2.85,
@@ -83,15 +109,29 @@ LEGACY_V34 = ModelProfile(
     notes="Older 44-game profile kept for comparison.",
 )
 
-PROFILE_REGISTRY = {p.name: p for p in (STABLE_V35, CANDIDATE_V36, LEGACY_V34)}
+PROFILE_REGISTRY = {
+    p.name: p
+    for p in (STABLE_V35, CANDIDATE_V36, GROUP_V37A, KNOCKOUT_LOCKED, LEGACY_V34)
+}
 PROFILE_ALIASES = {
     "stable": STABLE_V35.name,
     "core": STABLE_V35.name,
     "v35": STABLE_V35.name,
-    "production": STABLE_V35.name,
+    "production": GROUP_V37A.name,
+    "active": GROUP_V37A.name,
+    "group": GROUP_V37A.name,
+    "v37": GROUP_V37A.name,
+    "v37a": GROUP_V37A.name,
     "candidate": CANDIDATE_V36.name,
     "experimental": CANDIDATE_V36.name,
     "v36": CANDIDATE_V36.name,
+    "knockout": KNOCKOUT_LOCKED.name,
+    "ko": KNOCKOUT_LOCKED.name,
+    "r32": KNOCKOUT_LOCKED.name,
+    "r16": KNOCKOUT_LOCKED.name,
+    "qf": KNOCKOUT_LOCKED.name,
+    "sf": KNOCKOUT_LOCKED.name,
+    "final": KNOCKOUT_LOCKED.name,
     "legacy": LEGACY_V34.name,
     "v34": LEGACY_V34.name,
 }
@@ -138,9 +178,11 @@ def predict_match(
     market_odds: tuple[float, float, float] | None = None,
     market_method: str = "proportional",
     competition_state=None,
+    elo_override: Mapping[str, float] | None = None,
 ) -> Prediction:
-    eh = ELO[home] + (HOME if host_home else 0)
-    ea = ELO[away]
+    ratings = elo_override if elo_override is not None else ELO
+    eh = ratings[home] + (HOME if host_home else 0)
+    ea = ratings[away]
     lh, la = mm.elo_to_lambdas(eh, ea, avg_goals=profile.avg_goals, gd_per_100=profile.gd_per_100)
     state_lineup_home = 1.0
     state_lineup_away = 1.0
