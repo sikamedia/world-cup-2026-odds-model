@@ -125,11 +125,12 @@ def main() -> None:
         ]
     )
     jun26_data = json.loads(jun26_template_json.read_text(encoding="utf-8"))
-    spain_state = jun26_data["matches"]["Uruguay|Spain"]["competition_state"]
+    spain_state = jun26_data["matches"]["Spain|Saudi Arabia"]["competition_state"]
     assert spain_state is not None
-    assert spain_state["home"]["stake_state"] == "mustwin"
-    assert spain_state["away"]["mathematical_state"] == "qualified"
-    assert spain_state["away"]["rotation_risk"] == "medium"
+    assert spain_state["home"]["mathematical_state"] == "qualified"
+    assert spain_state["home"]["stake_state"] == "advance"
+    assert spain_state["home"]["rotation_risk"] == "medium"
+    assert spain_state["away"]["stake_state"] == "mustwin"
     _run([sys.executable, "validate_context.py", "--context-file", str(jun26_template_json)])
     pred_proc = subprocess.run(
         [
@@ -172,7 +173,7 @@ def main() -> None:
         ]
     )
     jun26_contexts = load_context_file(jun26_imported_json)
-    assert jun26_contexts[context_key("Uruguay", "Spain")].competition_state is not None
+    assert jun26_contexts[context_key("Spain", "Saudi Arabia")].competition_state is not None
     print("COMPETITION_STATE_CONTEXT_REGRESSION PASS")
 
 

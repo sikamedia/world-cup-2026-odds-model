@@ -2,13 +2,15 @@
 
 [English](INSTALL_SKILL.en.md) | [中文](INSTALL_SKILL.zh-CN.md)
 
-本仓库包含两种安装形式：
+本仓库提供两种安装形式：
 
-- `football-odds-model.skill`：已打包的 skill 安装文件。
-- `skill_update_v37/`：未打包的 skill 源码目录。
+- `football-odds-model.skill`：已打包的 skill 文件（用 `python3 build_skill.py`
+  重新生成）。
+- `skill/`：skill 专属源文件（SKILL.md、INSTALL 文档、`scripts/`）。活跃的模型
+  和管线代码位于仓库根目录；`build_skill.py` 会把两者组装成完整的 skill 包。
 
 如果你的 Codex/Claude 界面支持导入 skill，请优先使用 `.skill` 文件。需要检查
-源码或手动复制安装时，使用 `skill_update_v37/`。
+源码或手动复制安装时，使用构建产物。
 
 ## 方式一：安装打包文件
 
@@ -22,10 +24,14 @@
 
 ## 方式二：源码手动安装
 
-把 `skill_update_v37/` 中的内容复制到本地 skill 目录，并将目标文件夹命名为
-`football-odds-model`。
+先构建 skill 包，再复制到本地 skill 目录：
 
-期望目录结构：
+```bash
+python3 build_skill.py        # 生成 dist/football-odds-model/ 和 .skill 文件
+cp -R dist/football-odds-model /path/to/your/skills/
+```
+
+期望的包目录结构：
 
 ```text
 football-odds-model/
@@ -54,7 +60,7 @@ python3 test_jun26_results_scaffold.py
 
 ## 直接运行 Skill 脚本
 
-在 `skill_update_v37/` 目录中运行：
+在仓库根目录运行：
 
 ```bash
 python3 create_context_template.py --source jun26 --format csv --output /tmp/jun26.csv
@@ -76,9 +82,9 @@ export ODDS_API_SPORT_KEY="..."
 
 ## 更新 Skill
 
-1. 重新构建或替换 `football-odds-model.skill`。
-2. 在界面中重新导入 `.skill` 文件，或用 `skill_update_v37/` 替换手动安装的
-   `football-odds-model/` 目录。
+1. 运行 `python3 build_skill.py` 重新生成 `football-odds-model.skill`。
+2. 在界面中重新导入 `.skill` 文件，或用新构建的 `dist/football-odds-model/`
+   替换手动安装的 `football-odds-model/` 目录。
 3. 运行上面的四个验证命令。
 
 ## 当前 Skill 版本
