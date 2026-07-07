@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from bet_ledger import append_ledger_rows, build_ledger_row, read_ledger, risk_status, write_ledger
-from elo_current_jul4 import ELO_CURRENT
+from elo_current_jul7 import ELO_CURRENT
 from model_stability import KNOCKOUT_LOCKED, predict_match
 
 
@@ -75,6 +75,8 @@ def main() -> None:
         context_json = tmp / "context.json"
         signals_csv = tmp / "signals.csv"
         ledger_csv = tmp / "ledger.csv"
+        audited_signals_csv = tmp / "signals_audited.csv"
+        external_ratings_csv = tmp / "external_ratings.csv"
         settled_csv = tmp / "settled.csv"
         results_csv = tmp / "results.csv"
 
@@ -130,6 +132,51 @@ def main() -> None:
         assert paper["selection"] == expected_selection
         assert 0.0 < float(paper["stake_units"]) <= 0.5
         assert float(paper["edge_net"]) >= 0.03
+
+        external_ratings_csv.write_text(
+            "\n".join(
+                [
+                    "team,rank,rating,source",
+                    "France,10,80.0,opta_mock",
+                    "Morocco,1,90.0,opta_mock",
+                    "Mexico,5,87.0,opta_mock",
+                    "England,6,86.5,opta_mock",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        _run(
+            [
+                sys.executable,
+                "generate_paper_signals.py",
+                "--context-file",
+                str(context_json),
+                "--output-csv",
+                str(audited_signals_csv),
+                "--date",
+                "2026-07-05",
+                "--stage",
+                "R16",
+                "--max-odds-age-minutes",
+                "60",
+                "--external-ratings-csv",
+                str(external_ratings_csv),
+                "--external-rating-gap-threshold",
+                "1",
+            ]
+        )
+        audited_rows = _read_csv(audited_signals_csv)
+        audited_france = next(
+            row
+            for row in audited_rows
+            if row["home"] == paper["home"] and row["away"] == paper["away"]
+        )
+        assert audited_france["status"] == "watchlist"
+        assert audited_france["stake_units"] == "0.00"
+        assert audited_france["p_model"] == paper["p_model"]
+        assert "rating_audit manual_review" in audited_france["notes"]
+        assert "paper_bet downgraded to watchlist" in audited_france["notes"]
 
         appended, skipped = append_ledger_rows(ledger_csv, rows)
         assert appended == 0

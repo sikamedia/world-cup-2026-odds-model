@@ -142,7 +142,7 @@ python3 generate_paper_signals.py \
 ```
 
 By default, `generate_paper_signals.py` uses prediction-side current Elo from
-`elo_current_jul4.py`. Group-stage labels select `group_v37a`; knockout labels
+`elo_current_jul7.py`. Group-stage labels select `group_v37a`; knockout labels
 such as `R32`, `R16`, `QF`, `SF`, and `final` select `knockout_locked`. Use
 `--elo-source snapshot` only for historical replay, not live paper trading.
 
@@ -152,6 +152,24 @@ Default gates:
 - `edge_net >= 0.03` to become `paper_bet`
 - max stake `0.5u`, daily paper risk `2.0u`
 - no bet when market margin is above `8%` or model/market gap is above `15pp`
+
+Optional second-opinion ratings, such as an Opta export, can be supplied as an
+audit file:
+
+```bash
+python3 generate_paper_signals.py \
+  --context-file /tmp/jun26.merged.json \
+  --output-csv /tmp/paper_signals.csv \
+  --date 2026-07-05 \
+  --stage R16 \
+  --external-ratings-csv opta_ratings.csv
+```
+
+The external ratings file is not blended into `p_model`. It only flags
+material rating disagreements; a `paper_bet` with a strong external-rating
+disagreement is downgraded to `watchlist` with an audit note.
+Supported CSV columns are `team` plus `rank` and/or `rating`, with optional
+`source`.
 
 Settle after confirmed results:
 

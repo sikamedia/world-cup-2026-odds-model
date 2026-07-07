@@ -24,12 +24,13 @@ from bet_ledger import (
     write_ledger,
 )
 from competition_state import match_adjustments
+from external_ratings import audit_fixture_ratings, load_external_ratings_csv
 from match_context import context_key, de_margin_odds, load_context_file
-from model_stability import PROFILE_REGISTRY, KNOCKOUT_LOCKED, GROUP_V37A, predict_match, resolve_profile
+from model_stability import GROUP_V37A, KNOCKOUT_LOCKED, PROFILE_REGISTRY, predict_match, resolve_profile
 from team_aliases import resolve_team_name
 
 try:
-    from elo_current_jul4 import ELO_CURRENT, FETCHED as ELO_CURRENT_FETCHED
+    from elo_current_jul7 import ELO_CURRENT, FETCHED as ELO_CURRENT_FETCHED
 except Exception:  # pragma: no cover - optional prediction-side snapshot
     ELO_CURRENT = None
     ELO_CURRENT_FETCHED = "unavailable"
@@ -178,6 +179,9 @@ def _best_signal(
     policy: RiskPolicy,
     block_reasons: list[str],
     elo_source: str,
+    external_ratings: dict | None,
+    external_rank_gap_threshold: int,
+    external_rating_gap_threshold: float,
 ) -> dict[str, str] | None:
     if ctx.market_odds is None:
         return None
@@ -251,7 +255,28 @@ def _best_signal(
         min_edge_net=policy.min_edge_net,
         max_stake_units=policy.max_stake_units,
     ) if status == "paper_bet" else 0.0
-    notes = "; ".join(part for part in [status_note, elo_note, ctx.notes] if part)
+    audit_note = ""
+    if external_ratings is not None:
+        audit = audit_fixture_ratings(
+            home,
+            away,
+            model_probs=model_probs,
+            market_probs=market_probs,
+            ratings=external_ratings,
+            rank_gap_threshold=external_rank_gap_threshold,
+            rating_gap_threshold=external_rating_gap_threshold,
+        )
+        audit_note = audit.reason
+        if status == "paper_bet" and audit.manual_review:
+            original_stake = stake
+            status = "watchlist"
+            stake = 0.0
+            audit_note += (
+                f"; paper_bet downgraded to watchlist; "
+                f"confidence_penalty={audit.confidence_penalty:.2f}; "
+                f"would_be_stake={original_stake:.2f}u"
+            )
+    notes = "; ".join(part for part in [status_note, elo_note, audit_note, ctx.notes] if part)
 
     return build_ledger_row(
         date=date,
@@ -312,7 +337,23 @@ def main() -> None:
         "--elo-source",
         choices=["current", "snapshot"],
         default="current",
-        help="Prediction-side Elo source. Default current uses elo_current_jul4.py; snapshot uses backtest Elo.",
+        help="Prediction-side Elo source. Default current uses elo_current_jul7.py; snapshot uses backtest Elo.",
+    )
+    ap.add_argument(
+        "--external-ratings-csv",
+        help="Optional second-opinion ratings CSV (for example Opta). Used only for audit/downgrade flags; does not change p_model.",
+    )
+    ap.add_argument(
+        "--external-rank-gap-threshold",
+        type=int,
+        default=8,
+        help="Minimum external rank gap before rating audit can trigger manual review.",
+    )
+    ap.add_argument(
+        "--external-rating-gap-threshold",
+        type=float,
+        default=2.0,
+        help="Minimum external rating gap before rating audit can trigger manual review.",
     )
     ap.add_argument("--uncertainty-discount", type=float, default=DEFAULT_RISK_POLICY.uncertainty_discount)
     ap.add_argument("--min-edge-net", type=float, default=DEFAULT_RISK_POLICY.min_edge_net)
@@ -346,6 +387,11 @@ def main() -> None:
     meta, context_matches = _context_payload(context_path)
     contexts = load_context_file(context_path)
     fixtures = _load_fixture_rows(args.fixture_csv, context_matches)
+    external_ratings = (
+        load_external_ratings_csv(args.external_ratings_csv)
+        if args.external_ratings_csv
+        else None
+    )
 
     rows: list[dict[str, str]] = []
     skipped_missing_odds = 0
@@ -376,6 +422,9 @@ def main() -> None:
             policy=policy,
             block_reasons=block_reasons,
             elo_source=args.elo_source,
+            external_ratings=external_ratings,
+            external_rank_gap_threshold=args.external_rank_gap_threshold,
+            external_rating_gap_threshold=args.external_rating_gap_threshold,
         )
         if row is not None:
             rows.append(row)
