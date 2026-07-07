@@ -1,11 +1,12 @@
-# football-odds-model v3.7 Install Guide
+# football-odds-model v3.8 Install Guide
 
 [English](INSTALL.en.md) | [中文](INSTALL.zh-CN.md)
 
-This bundle packages the backtested v3.6A core defaults together with the
-v3.7 market-context pipeline. The core engine stays conservative; the added
-`competition_state` layer records qualified, eliminated, must-win, top-spot,
-and rotation-risk context without refitting the core parameters.
+This bundle packages the frozen v3.7A group-stage profile, the locked v3.8
+knockout advancement profile, and the market-context pipeline. The core engine
+stays conservative; `competition_state` records qualified, eliminated,
+must-win, top-spot, and rotation-risk context without refitting core
+parameters.
 
 ## What Changed
 
@@ -17,8 +18,11 @@ Only three core defaults changed from older bundles:
 | `draw_boost` | 0.07 | **0.06** | Model draw rate re-aligns with the 54-game sample. |
 | `avg_goals` | 2.85 | **2.90** | Better O/U 2.5 calibration. |
 
-The 54-game regression locks the v3.6A core: direction 34/54, RPS 0.1508,
-model draw rate 25.7%, and blowout expectation 13.2.
+The 72-game group-stage regression locks the v3.7A profile. Knockout games are
+kept in a separate batch: as of 2026-07-07, `backtest_ko.py` validates KO n=22,
+advancement 17/22, advancement Brier 0.1742, and 90-minute RPS 0.1576. The
+graded-k knockout profile remains locked; n=22 is still monitor-only, not a
+refit trigger.
 
 ## Install
 
@@ -36,7 +40,7 @@ If you manually copy files, include:
 - top-level model and pipeline scripts
 - `competition_state.py`, `match_context.py`, `team_aliases.py`,
   `worldcup_2026_data.py`, `worldcup_2026_data_jun26.py`,
-  `model_stability.py`, and `market_blend.py`
+  `worldcup_2026_data_ko.py`, `model_stability.py`, and `market_blend.py`
 - tests: `test_regression.py`, `test_odds_api_pipeline.py`,
   `test_competition_state_context.py`, `test_jun26_results_scaffold.py`
 
@@ -46,6 +50,7 @@ Run these checks from the installed skill directory:
 
 ```bash
 python3 test_regression.py
+python3 backtest_ko.py
 python3 test_odds_api_pipeline.py
 python3 test_competition_state_context.py
 python3 test_jun26_results_scaffold.py
@@ -54,6 +59,7 @@ python3 test_jun26_results_scaffold.py
 Expected pass markers:
 
 - `ALL v3.6 REGRESSION CHECKS PASSED`
+- `KNOCKOUT BACKTEST — 22 game(s)`
 - `ODDS_API_PIPELINE_REGRESSION PASS`
 - `COMPETITION_STATE_CONTEXT_REGRESSION PASS`
 - `JUN26_RESULTS_SCAFFOLD PASS`
@@ -108,10 +114,11 @@ the batch-5 out-of-sample section.
 
 ## Package Contents
 
-- `scripts/match_model.py`: patched v3.6A core engine.
+- `scripts/match_model.py`: active staged engine (`--stage group|knockout`).
 - `scripts/tournament_mc.py`: tournament Monte Carlo helper.
 - `SKILL.md`: bilingual skill instructions.
 - `competition_state.py`: qualification and rotation-risk context layer.
+- `worldcup_2026_data_ko.py` and `backtest_ko.py`: separate knockout batch.
 - top-level `*.py` files: market-context and prediction pipeline.
 - `test_*.py`: regression and pipeline tests.
 

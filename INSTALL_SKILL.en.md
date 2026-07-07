@@ -94,6 +94,7 @@ account data.
 
 ## Current Skill Version
 
-The v0.1 repository release ships the v3.7 skill bundle. The core model defaults
-remain conservative and stay separate from market-context and competition-state
-ingestion.
+The current dev branch ships the v3.8 skill bundle: frozen v3.7A group-stage
+profile, locked graded-k knockout advancement profile, KO backtest n=22, and the
+market-context pipeline. Paper-trading ledger tools stay repository-side and are
+not packaged as skill capabilities.

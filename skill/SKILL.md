@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.8 bundle (graded-k knockout LOCKED + market-context pipeline)
+# Football Odds Model — v3.8 bundle (KO n=22 + graded-k knockout LOCKED + market-context pipeline)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -49,19 +49,23 @@ description: >-
 >   a **GRADED, ΔElo-dependent ko_regress (LOCKED 2026-07-04, pre-registered
 >   2026-07-03)**: `k_eff = 0.70 + 0.30 × min(1, |ΔElo|/350)`. Coin-flips keep
 >   the full variance buffer (k 0.70); crushing favourites barely regress
->   (k→1.00). Evidence (R32 complete, n=16): advancement Brier **0.1733** vs
->   flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all round — all 3
->   favourite exits were pens-after-draw (Ger +230, Ned +110, Aus +92), while
->   every ΔElo≥232 favourite advanced in 90'. Flat 1.00 scored 0.1699 but is
->   REJECTED: it spends the whole buffer (Argentina +495 was still dragged to
->   1-1 at 90'). Auto-graded when `--elo` is given (prints k_eff); explicit
+>   (k→1.00). Initial lock evidence (R32 complete, n=16): advancement Brier
+>   **0.1733** vs flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all
+>   round — all 3 favourite exits were pens-after-draw (Ger +230, Ned +110,
+>   Aus +92), while every ΔElo≥232 favourite advanced in 90'. Live monitoring
+>   through 2026-07-07 (KO n=22): called 17/22, advancement Brier **0.1742**,
+>   90' RPS **0.1576**, actual upsets 5 vs model-expected 7.00. Flat 1.00 is
+>   still best on n=22 (Brier 0.1709) but remains MONITOR-ONLY, not a refit.
+>   It spends the whole buffer (Argentina +495 was still dragged to 1-1 at
+>   90'). Auto-graded when `--elo` is given (prints k_eff); explicit
 >   `--ko-regress` overrides; falls back to flat 0.70 without Elo input. Output
 >   is an **advancement probability** (`adv_home + adv_away = 1`), NOT a
 >   regressed 90' W/D/L. Drop motivation/rotation — everyone is full strength.
 > RULE: tune the knockout profile ONLY on its own batch (`backtest_ko.py` over
 > `worldcup_2026_data_ko.py`); never mix knockout games into the group-stage
-> parameter search. Discipline: R16 (n→24) is MONITOR-ONLY; any further change
-> (incl. revisiting flat 1.00) must be pre-registered before testing at n=24.
+> parameter search. Discipline: R16 is MONITOR-ONLY through n=22; any further
+> change (incl. revisiting flat 1.00 after full R16 reaches n=24) must be
+> pre-registered before testing.
 > `tournament_mc.py` reuses the SAME group profile via `elo_to_lambdas` (no
 > private slope) and its knockout damping is now graded to match
 > (`graded_damp` 0.72→1.00 over |ΔElo|/350; `--damp` forces the legacy flat).

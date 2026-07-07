@@ -18,7 +18,11 @@ import os
 import random
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "skill", "scripts"))
+ROOT = os.path.dirname(__file__)
+for _scripts in (os.path.join(ROOT, "skill", "scripts"), os.path.join(ROOT, "scripts")):
+    if os.path.isdir(_scripts):
+        sys.path.insert(0, _scripts)
+        break
 import match_model as mm  # noqa: E402
 
 from worldcup_2026_data_ko import ELO  # noqa: E402
