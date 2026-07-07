@@ -42,7 +42,11 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("Australia", "Egypt", 1, 1, "A", "R32"),       # 90' 1-1 (Ashour 13'; Hany OG 55'). 1-1 AET -> Egypt 4-2 pens (Salah panenka; Souttar+Harrington missed). Egypt first-ever KO win (AT&T Arlington). Verified Sky/Opta/SBS 7/4.
     ("Colombia", "Ghana", 1, 0, "H", "R32"),        # Arias 14'; Colombia through in 90' (Arrowhead KC). Fav advanced. Verified ESPN/Yahoo 7/4.
     ("Canada", "Morocco", 0, 3, "A", "R16"),        # Ounahi x2 + Rahimi 90'+; Morocco rout, through to QF (NRG Houston). Market (MAR 68.8% adv) right, stale-Elo model coin-flip (CAN 50.5%) wrong — Elo-staleness evidence #2. Verified ESPN/NBC/Outlook 7/4.
+    ("Brazil", "Norway", 1, 2, "A", "R16"),         # Haaland late double (~88',90+'), Neymar 90+' pen consolation; Guimaraes 1H pen SAVED by Nyland. Norway first-ever QF. FIRST regulation upset of the tournament (both model 44.6/33.8/21.6 and market 52.4/25.7/21.9 had Brazil). Verified NBC/Outlook/VAVEL 7/5.
     ("Paraguay", "France", 0, 1, "A", "R16"),       # Mbappe 70' pen (VAR, Gomez knee on Doue); 100F heat Philadelphia, feisty/bruising. France through to QF vs Morocco (Gillette 7/9). Model fav side right (FRA adv 85.6%, market 92.6%). Verified ESPN/Opta/FIFA/Sky/AlJazeera 7/5.
+    ("Mexico", "England", 2, 3, "A", "R16"),        # Bellingham 2 in <2min late 1H; Quinones pre-HT; Quansah RED 54' (VAR) — England played ~40' with 10; Kane 60' pen 3-1, Jimenez 69' pen 3-2. Mexico's first-ever home WC loss. Model/market both ~ENG 51-52% adv — coin-flip called right. Verified FOX boxscore/NBC/CBS/englandfootball.com 7/6.
+    ("Portugal", "Spain", 0, 1, "A", "R16"),        # Merino 90+1' (Ferran Torres assist, both subs); Ronaldo's last WC game. Spain through to QF (AT&T Arlington, roof closed). Model adv SPA 67.2 / market 66.0 — fav advanced in 90'. Verified ESPN/FIFA/CBS/AlJazeera 7/7.
+    ("USA", "Belgium", 1, 4, "A", "R16"),           # De Ketelaere 9',32'; Tillman FK 31'; Vanaken 2H; Lukaku 90+'. Belgium rout at Lumen Seattle. Model BEL 52.9 adv RIGHT, market USA 51.6 WRONG (fan-money lean); pens-alert (32.9) didn't fire. Verified FIFA/ESPN/NPR/ussoccer 7/7.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA

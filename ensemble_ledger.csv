@@ -1,0 +1,7 @@
+date,stage,home,away,fav_side,p_model_currelo,p_market,p_ensemble,advanced_fav,brier_model,brier_market,brier_ensemble,notes
+2026-07-04,R16,Canada,Morocco,A,0.642,0.688,0.591,1,0.128,0.097,0.167,"model prob = current-Elo counterfactual (stored-Elo live call was CAN 50.5%); market = de-margined advance; sources: 7/5 report sec 三"
+2026-07-04,R16,Paraguay,France,A,0.827,0.889,0.858,1,0.030,0.012,0.020,"current-Elo rerun 7/4 PM (live report used stored-Elo 85.6%); brier_model on 0.827"
+2026-07-05,R16,Brazil,Norway,H,0.599,0.665,0.632,0,0.359,0.442,0.399,"model B (current Elo, heat+rain, Ryerson reinstated); market avg FanDuel/-118 book; FIRST regulation upset of tournament — model beat market on Brier for the first time"
+2026-07-05,R16,Mexico,England,A,0.514,0.519,0.517,1,0.236,0.231,0.233,"live current-Elo call (Azteca +90, dEff -13); market bet365/book2/Kalshi advance avg; model=market within 0.5pt pre-match; ENG won 3-2 in 90 despite 54-min red"
+2026-07-06,R16,Portugal,Spain,A,0.672,0.660,0.666,1,0.108,0.116,0.112,"live current-Elo call; market FanDuel/bet365 advance de-margin; model=market within 1.2pt; Merino 90+1 — Spain in 90'"
+2026-07-06,R16,USA,Belgium,A,0.529,0.484,0.507,1,0.222,0.266,0.243,"live current-Elo call (Lumen +85); market BetMGM advance; 4.5pt disagreement — MODEL side right, market (fan-money USA lean) wrong; BEL 4-1 rout; pens-alert 32.9 did not fire"
