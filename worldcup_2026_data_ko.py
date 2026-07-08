@@ -47,6 +47,8 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("Mexico", "England", 2, 3, "A", "R16"),        # Bellingham 2 in <2min late 1H; Quinones pre-HT; Quansah RED 54' (VAR) — England played ~40' with 10; Kane 60' pen 3-1, Jimenez 69' pen 3-2. Mexico's first-ever home WC loss. Model/market both ~ENG 51-52% adv — coin-flip called right. Verified FOX boxscore/NBC/CBS/englandfootball.com 7/6.
     ("Portugal", "Spain", 0, 1, "A", "R16"),        # Merino 90+1' (Ferran Torres assist, both subs); Ronaldo's last WC game. Spain through to QF (AT&T Arlington, roof closed). Model adv SPA 67.2 / market 66.0 — fav advanced in 90'. Verified ESPN/FIFA/CBS/AlJazeera 7/7.
     ("USA", "Belgium", 1, 4, "A", "R16"),           # De Ketelaere 9',32'; Tillman FK 31'; Vanaken 2H; Lukaku 90+'. Belgium rout at Lumen Seattle. Model BEL 52.9 adv RIGHT, market USA 51.6 WRONG (fan-money lean); pens-alert (32.9) didn't fire. Verified FIFA/ESPN/NPR/ussoccer 7/7.
+    ("Argentina", "Egypt", 3, 2, "H", "R16"),      # Egypt led 2-0 (Yasser Ibrahim 15', Zico 67'); Romero 79', Messi 83', Enzo Fernandez 90+2' — ARG comeback in 90' (Mercedes-Benz Atlanta, roof closed). Salah started. Verified ESPN/FIFA/NBC/NPR/olympics.com 7/8.
+    ("Switzerland", "Colombia", 0, 0, "H", "R16"),  # 0-0 after 120'; Switzerland 4-3 pens (Vargas winning kick) — first Swiss QF since 1954 (BC Place Vancouver). Pens-alert (32.4) FIRED and HIT; Elo pen tilt had COL 51.7. Verified ESPN/FIFA/FOX/CBS 7/8.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA
