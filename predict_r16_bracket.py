@@ -49,7 +49,8 @@ def p_advance(a, b):
         return _cache[(a, b)]
     ea, eb = ELO[a], ELO[b]
     lh, la = mm.elo_to_lambdas(ea, eb, avg_goals=KO["avg_goals"],
-                               gd_per_100=KO["gd_per_100"])
+                               gd_per_100=KO["gd_per_100"],
+                               floor=KO.get("lambda_floor", 0.15))
     style = "open" if abs(ea - eb) >= 266 else "balanced"
     P = mm.score_matrix(lh, la, opp_style=style, draw_boost=KO["draw_boost"])
     e_home = 1 / (1 + 10 ** (-(ea - eb) / 400))

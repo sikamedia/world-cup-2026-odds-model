@@ -78,13 +78,16 @@ description: >-
 >   (frozen). floor-0.15 stays as a SHADOW line in `backtest_ko.py` for two
 >   more rounds (QF+SF); rollback per pre-registration if it wins there.
 > - **Ensemble weight w = 0.6 model / 0.4 market — ADOPTED** (was 50:50).
->   Unified ledger n=8: model Brier 0.1769 < market 0.1910 ≈ 50:50 ensemble
->   0.1901. Grid-fit optimum was w=1.0 but 3 of 8 games are market-wrong-side
->   low-frequency events — half-step to 0.6, refit at n=12.
+>   Unified ledger n=8: model Brier 0.1769 < market 0.1910; recomputed
+>   current-Elo 50:50 ensemble 0.1834. The CSV `p_ensemble` column contains one
+>   `mixed_legacy` row from the stale-Elo/current-Elo transition, so the n=12
+>   refit must filter/report by `basis`. Grid-fit optimum was w=1.0, but
+>   3 of 8 games are market-wrong-side low-frequency events — half-step to 0.6.
 > - **graded-k HELD** (n=24: graded 0.1752 vs flat-1.00 0.1736 — gap halved
 >   by the Swi-Col upset, exactly the designed buffer case; review at n=28).
-> - **draw_boost 0.06 HELD** (model 90' draws 6.8 expected vs 6 actual on
->   n=24; recheck at n=28 jointly with the λ-floor interaction).
+> - **draw_boost 0.06 HELD** (neutral KO backtest口径: model 90' draws 6.8
+>   expected vs 6 actual on n=24; recheck at n=28 jointly with the
+>   λ-floor interaction).
 > - **Lineup rule codified: only adjust on OFFICIAL rulings** (confirmed
 >   absences/suspensions), never on rumours or "expected out" reports;
 >   re-verify suspensions match-day (Balogun overturn + Quansah lessons).

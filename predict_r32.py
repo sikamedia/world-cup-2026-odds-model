@@ -29,7 +29,8 @@ KO = mm.STAGE_PROFILES["knockout"]
 def tie(home, away):
     eh, ea = ELO[home], ELO[away]
     lh, la = mm.elo_to_lambdas(eh, ea, avg_goals=KO["avg_goals"],
-                               gd_per_100=KO["gd_per_100"])
+                               gd_per_100=KO["gd_per_100"],
+                               floor=KO.get("lambda_floor", 0.15))
     style = "open" if abs(eh - ea) >= 266 else "balanced"
     P = mm.score_matrix(lh, la, opp_style=style, draw_boost=KO["draw_boost"])
     ph, pd, pa, _ov, _btts = mm.summarise(P)

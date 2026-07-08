@@ -16,7 +16,11 @@ import os
 import random
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "skill", "scripts"))
+ROOT = os.path.dirname(__file__)
+for _scripts in (os.path.join(ROOT, "skill", "scripts"), os.path.join(ROOT, "scripts")):
+    if os.path.isdir(_scripts):
+        sys.path.insert(0, _scripts)
+        break
 import match_model as mm  # noqa: E402
 
 KO = mm.STAGE_PROFILES["knockout"]
@@ -141,20 +145,22 @@ bk = sum((pk-y)**2 for pm, pk, y in rows)/len(rows)
 be = sum((0.5*pm+0.5*pk-y)**2 for pm, pk, y in rows)/len(rows)
 print(f"(c) ensemble ledger n=8: model {bm:.4f} < ens50 {be:.4f} < market {bk:.4f}")
 print(f"      best w (grid .05): w_model = {best[1]:.2f} -> Brier {best[0]:.4f}")
+print("      basis caveat: CSV p_ensemble has one mixed_legacy row from the "
+      "stale/current Elo transition; n=12 refit must filter/report by basis.")
 print("      DECISION: n=8 too small for a hard switch; move official "
       "ensemble to w=0.6 model / 0.4 market (conservative step toward "
       "the fitted optimum), re-fit at n=12.")
 
 # (d) KO draw_boost 0.06 check: expected vs actual 90' draws over n=24.
+# Use the same neutral-venue KO backtest口径 as backtest_ko.py. Do not apply
+# host bumps here; historical predictions may have host/context adjustments,
+# but the parameter review batch is neutral by construction.
 import worldcup_2026_data_ko as ko  # noqa: E402
 exp_draws, act_draws = 0.0, 0
 for home, away, hg, ag, advanced, stage in ko.KO_RESULTS:
     eh, ea = ko.ELO[home], ko.ELO[away]
-    if home in ("USA", "Mexico", "Canada") or away in ("USA", "Mexico", "Canada"):
-        pass  # backtest applies host bumps internally; replicate simply:
-    bump = 85 if home in ("USA",) else (90 if home == "Mexico" else 0)
-    lh, la = lambdas_floor(eh + bump, ea, 0.15)
-    r = ko_from_lambdas(lh, la, eh + bump - ea)
+    lh, la = lambdas_floor(eh, ea, 0.15)
+    r = ko_from_lambdas(lh, la, eh - ea)
     exp_draws += r["d"]
     act_draws += 1 if hg == ag else 0
 print(f"(d) KO draw_boost 0.06: expected 90' draws {exp_draws:.1f} vs "
