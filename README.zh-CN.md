@@ -138,10 +138,10 @@ python3 generate_paper_signals.py \
   --stage R16
 ```
 
-`generate_paper_signals.py` 默认使用 `elo_current_jul4.py` 里的预测侧当前 Elo。
-小组赛标签会选择 `group_v37a`；`R32`、`R16`、`QF`、`SF`、`final` 等淘汰赛
-标签会选择 `knockout_locked`。`--elo-source snapshot` 只用于历史回放，不用于
-实时模拟交易。
+`generate_paper_signals.py` 默认使用 `elo_current_jul8.py` 里的预测侧当前 Elo
+（7/7 已核验基线 + 7/7 后比赛的 K=60 估算，文件内已标注）。小组赛标签会选择
+`group_v37a`；`R32`、`R16`、`QF`、`SF`、`final` 等淘汰赛标签会选择
+`knockout_locked`。`--elo-source snapshot` 只用于历史回放，不用于实时模拟交易。
 
 默认闸门：
 
@@ -149,6 +149,21 @@ python3 generate_paper_signals.py \
 - `edge_net >= 0.03` 才进入 `paper_bet`
 - 单笔最高 `0.5u`，单日模拟风险 `2.0u`
 - 市场水位超过 `8%`，或模型/市场差异超过 `15pp`，自动 `no_bet`
+
+可以额外提供第二意见评级，例如 Opta 导出的 CSV：
+
+```bash
+python3 generate_paper_signals.py \
+  --context-file /tmp/jun26.merged.json \
+  --output-csv /tmp/paper_signals.csv \
+  --date 2026-07-05 \
+  --stage R16 \
+  --external-ratings-csv opta_ratings.csv
+```
+
+外部评级不会混入 `p_model`。它只做分歧审计：如果外部评级与模型/市场方向出现
+明显冲突，原本的 `paper_bet` 会降级为 `watchlist`，并在 notes 中记录原因。
+CSV 支持 `team` 加 `rank` 和/或 `rating`，可选 `source`。
 
 确认赛果后结算：
 

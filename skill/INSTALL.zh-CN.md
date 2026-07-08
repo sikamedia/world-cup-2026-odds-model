@@ -1,10 +1,10 @@
-# football-odds-model v3.7 安装说明
+# football-odds-model v3.9 安装说明
 
 [English](INSTALL.en.md) | [中文](INSTALL.zh-CN.md)
 
-本包把已回测验证的 v3.6A 核心默认值和 v3.7 市场上下文管线一起打包。核心引擎
-保持保守；新增的 `competition_state` 状态层只记录已出线、已淘汰、必须赢、
-争小组第一和轮换风险，不重新拟合核心参数。
+本包把冻结的 v3.7A 小组赛 profile、锁定的 v3.9 淘汰赛晋级 profile，以及市场
+上下文管线一起打包。核心引擎保持保守；`competition_state` 状态层只记录已出线、
+已淘汰、必须赢、争小组第一和轮换风险，不重新拟合核心参数。
 
 ## 改动摘要
 
@@ -16,8 +16,9 @@
 | `draw_boost` | 0.07 | **0.06** | 模型平局率重新贴合 54 场样本。 |
 | `avg_goals` | 2.85 | **2.90** | 大小球 2.5 校准更好。 |
 
-54 场回归测试锁定 v3.6A 核心表现：方向 34/54，RPS 0.1508，模型平局率
-25.7%，大比分期望 13.2。
+72 场小组赛回归测试锁定 v3.7A profile。淘汰赛单独建批次：截至 2026-07-08，
+`backtest_ko.py` 校验 KO n=24，晋级判对 18/24，v3.9 lambda floor 下 90 分钟
+RPS 0.1502。graded-k 淘汰赛 profile 继续锁定；flat-k 仍只监控。
 
 ## 安装
 
@@ -34,7 +35,7 @@
 - 顶层模型和管线脚本
 - `competition_state.py`、`match_context.py`、`team_aliases.py`、
   `worldcup_2026_data.py`、`worldcup_2026_data_jun26.py`、
-  `model_stability.py` 和 `market_blend.py`
+  `worldcup_2026_data_ko.py`、`model_stability.py` 和 `market_blend.py`
 - 测试：`test_regression.py`、`test_odds_api_pipeline.py`、
   `test_competition_state_context.py`、`test_jun26_results_scaffold.py`
 
@@ -44,6 +45,7 @@
 
 ```bash
 python3 test_regression.py
+python3 backtest_ko.py
 python3 test_odds_api_pipeline.py
 python3 test_competition_state_context.py
 python3 test_jun26_results_scaffold.py
@@ -52,6 +54,7 @@ python3 test_jun26_results_scaffold.py
 预期通过标记：
 
 - `ALL v3.6 REGRESSION CHECKS PASSED`
+- `KNOCKOUT BACKTEST — 24 game(s)`
 - `ODDS_API_PIPELINE_REGRESSION PASS`
 - `COMPETITION_STATE_CONTEXT_REGRESSION PASS`
 - `JUN26_RESULTS_SCAFFOLD PASS`
@@ -103,10 +106,11 @@ python3 backtest_66.py
 
 ## 包内文件
 
-- `scripts/match_model.py`：已打补丁的 v3.6A 核心引擎。
+- `scripts/match_model.py`：当前分阶段引擎（`--stage group|knockout`）。
 - `scripts/tournament_mc.py`：锦标赛蒙特卡洛辅助脚本。
 - `SKILL.md`：中英文双语言 skill 指令。
 - `competition_state.py`：出线状态和轮换风险上下文层。
+- `worldcup_2026_data_ko.py` 和 `backtest_ko.py`：独立淘汰赛批次。
 - 顶层 `*.py` 文件：市场上下文和预测管线。
 - `test_*.py`：回归和管线测试。
 

@@ -18,7 +18,11 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "skill", "scripts"))
+ROOT = os.path.dirname(__file__)
+for _scripts in (os.path.join(ROOT, "skill", "scripts"), os.path.join(ROOT, "scripts")):
+    if os.path.isdir(_scripts):
+        sys.path.insert(0, _scripts)
+        break
 import match_model as mm  # noqa: E402
 
 from worldcup_2026_data_ko import ELO, HOME, KO_RESULTS  # noqa: E402,F401
@@ -48,13 +52,16 @@ def graded_k_for(eh, ea):
         KO.get("ko_elo_scale", 350.0))
 
 
-def predict(home, away):
+def predict(home, away, floor=None):
     """Neutral-venue knockout prediction (no host bump, no motivation).
     Returns 90' probs, the score matrix, the Elo home win-expectation, and the
-    advancement dict at the LOCKED graded ko_regress."""
+    advancement dict at the LOCKED graded ko_regress.
+    floor: lambda floor; None = the profile value (0.30 since v3.9)."""
     eh, ea = ELO[home], ELO[away]
+    if floor is None:
+        floor = KO.get("lambda_floor", 0.15)
     lh, la = mm.elo_to_lambdas(eh, ea, avg_goals=KO["avg_goals"],
-                               gd_per_100=KO["gd_per_100"])
+                               gd_per_100=KO["gd_per_100"], floor=floor)
     style = "open" if abs(eh - ea) >= 266 else "balanced"
     P = mm.score_matrix(lh, la, opp_style=style, draw_boost=KO["draw_boost"])
     ph, pd, pa, _ov, _btts = mm.summarise(P)
@@ -90,7 +97,8 @@ def main():
     n = len(games)
     print("#" * 64)
     print(f"# KNOCKOUT BACKTEST — {n} game(s)  (profile: avg_goals "
-          f"{KO['avg_goals']}, ko_regress {KO['ko_regress']})")
+          f"{KO['avg_goals']}, ko_regress {KO['ko_regress']}, "
+          f"lambda_floor {KO.get('lambda_floor', 0.15)})")
     print("#" * 64)
     if n == 0:
         print("\nNo knockout results recorded yet. Append rows to KO_RESULTS in "
@@ -134,6 +142,20 @@ def main():
     print(f"\n90' scoreline: RPS {rps/n:.4f} | logL {ll90:.2f} "
           f"(avg {ll90/n:.3f}) | dir {dir_hit}/{n} | draws {draws_act}/{n} "
           f"| blowout>=3 {blow_act} (model exp {blow_exp:.1f})")
+
+    # SHADOW floor-0.15 track (2 rounds after the 2026-07-08 v3.9 adoption of
+    # lambda_floor 0.30): same metrics at the old floor, summary line only.
+    if KO.get("lambda_floor", 0.15) != 0.15:
+        s_rps = s_ll90 = 0.0
+        s_records = []
+        for home, away, hg, ag, advanced, _stage in games:
+            ph, pd, pa, P, e_home, adv = predict(home, away, floor=0.15)
+            s_rps += rps_hda((ph, pd, pa), res(hg, ag))
+            s_ll90 += math.log(max(P[(hg, ag)], 1e-12))
+            s_records.append((P, e_home, advanced, ELO[home] - ELO[away]))
+        sb, sl, _se = adv_metrics(s_records, None)
+        print(f"SHADOW floor-0.15: RPS {s_rps/n:.4f} | logL avg {s_ll90/n:.3f} "
+              f"| adv Brier {sb:.4f} | adv logLoss {sl:.4f}")
 
     bg, lg, eg = adv_metrics(records, None)   # LOCKED graded default
     print(f"\nADVANCEMENT (LOCKED graded k {KO['ko_regress']}->"

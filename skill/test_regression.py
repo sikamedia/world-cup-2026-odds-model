@@ -21,6 +21,8 @@ import inspect
 src = inspect.getsource(mm.elo_to_lambdas)
 assert "avg_goals=2.90" in src and "gd_per_100=0.65" in src, "elo_to_lambdas defaults are not v3.6"
 assert "draw_boost=0.06" in inspect.getsource(mm.score_matrix), "score_matrix draw_boost is not 0.06"
+assert mm.STAGE_PROFILES["group"].get("lambda_floor") == 0.15, "group lambda_floor must stay frozen at 0.15"
+assert mm.STAGE_PROFILES["knockout"].get("lambda_floor") == 0.30, "KO v3.9 lambda_floor must be 0.30"
 
 ELO = {
  "Mexico":1890,"South Africa":1720,"Korea":1785,"Czechia":1800,"Canada":1870,

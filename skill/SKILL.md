@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.8 bundle (graded-k knockout LOCKED + market-context pipeline)
+# Football Odds Model — v3.9 bundle (KO n=24 review: λ-floor 0.30 + ensemble w=0.6 ADOPTED; graded-k held)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -49,19 +49,48 @@ description: >-
 >   a **GRADED, ΔElo-dependent ko_regress (LOCKED 2026-07-04, pre-registered
 >   2026-07-03)**: `k_eff = 0.70 + 0.30 × min(1, |ΔElo|/350)`. Coin-flips keep
 >   the full variance buffer (k 0.70); crushing favourites barely regress
->   (k→1.00). Evidence (R32 complete, n=16): advancement Brier **0.1733** vs
->   flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all round — all 3
->   favourite exits were pens-after-draw (Ger +230, Ned +110, Aus +92), while
->   every ΔElo≥232 favourite advanced in 90'. Flat 1.00 scored 0.1699 but is
->   REJECTED: it spends the whole buffer (Argentina +495 was still dragged to
->   1-1 at 90'). Auto-graded when `--elo` is given (prints k_eff); explicit
+>   (k→1.00). Initial lock evidence (R32 complete, n=16): advancement Brier
+>   **0.1733** vs flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all
+>   round — all 3 favourite exits were pens-after-draw (Ger +230, Ned +110,
+>   Aus +92), while every ΔElo≥232 favourite advanced in 90'. Live monitoring
+>   through 2026-07-07 (KO n=22): called 17/22, advancement Brier **0.1742**,
+>   90' RPS **0.1576**, actual upsets 5 vs model-expected 7.00. Flat 1.00 is
+>   still best on n=22 (Brier 0.1709) but remains MONITOR-ONLY, not a refit.
+>   It spends the whole buffer (Argentina +495 was still dragged to 1-1 at
+>   90'). Auto-graded when `--elo` is given (prints k_eff); explicit
 >   `--ko-regress` overrides; falls back to flat 0.70 without Elo input. Output
 >   is an **advancement probability** (`adv_home + adv_away = 1`), NOT a
 >   regressed 90' W/D/L. Drop motivation/rotation — everyone is full strength.
 > RULE: tune the knockout profile ONLY on its own batch (`backtest_ko.py` over
 > `worldcup_2026_data_ko.py`); never mix knockout games into the group-stage
-> parameter search. Discipline: R16 (n→24) is MONITOR-ONLY; any further change
-> (incl. revisiting flat 1.00) must be pre-registered before testing at n=24.
+> parameter search. Discipline: any change must be pre-registered before
+> testing; the n=24 (R16 complete) pre-registered review was executed
+> 2026-07-08 with these outcomes:
+>
+> **v3.9 changes (n=24 pre-registered review, 2026-07-08):**
+> - **λ floor 0.15 → 0.30 (knockout profile only) — ADOPTED.** Natural
+>   experiment: Argentina 3-2 Egypt (R16). Egypt's λ was pinned at the 0.15
+>   floor, making "Egypt scores 2" a ~1% event — Egypt scored 2 and led to
+>   79'. Goals-channel scoring favours 0.30 across the board (P(Egy≥2) 1.1%
+>   vs 3.8%, BTTS-yes logL −2.03 vs −1.42, P(3-2) 0.16% vs 0.54%); the
+>   adv/RPS channels' small preference for 0.15 was survivor bias (Argentina
+>   advanced anyway; cost on adv Brier ~0.005). Group profile keeps 0.15
+>   (frozen). floor-0.15 stays as a SHADOW line in `backtest_ko.py` for two
+>   more rounds (QF+SF); rollback per pre-registration if it wins there.
+> - **Ensemble weight w = 0.6 model / 0.4 market — ADOPTED** (was 50:50).
+>   Unified ledger n=8: model Brier 0.1769 < market 0.1910; recomputed
+>   current-Elo 50:50 ensemble 0.1834. The CSV `p_ensemble` column contains one
+>   `mixed_legacy` row from the stale-Elo/current-Elo transition, so the n=12
+>   refit must filter/report by `basis`. Grid-fit optimum was w=1.0, but
+>   3 of 8 games are market-wrong-side low-frequency events — half-step to 0.6.
+> - **graded-k HELD** (n=24: graded 0.1752 vs flat-1.00 0.1736 — gap halved
+>   by the Swi-Col upset, exactly the designed buffer case; review at n=28).
+> - **draw_boost 0.06 HELD** (neutral KO backtest口径: model 90' draws 6.8
+>   expected vs 6 actual on n=24; recheck at n=28 jointly with the
+>   λ-floor interaction).
+> - **Lineup rule codified: only adjust on OFFICIAL rulings** (confirmed
+>   absences/suspensions), never on rumours or "expected out" reports;
+>   re-verify suspensions match-day (Balogun overturn + Quansah lessons).
 > `tournament_mc.py` reuses the SAME group profile via `elo_to_lambdas` (no
 > private slope) and its knockout damping is now graded to match
 > (`graded_damp` 0.72→1.00 over |ΔElo|/350; `--damp` forces the legacy flat).
