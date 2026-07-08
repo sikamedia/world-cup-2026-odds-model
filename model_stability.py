@@ -32,6 +32,7 @@ class ModelProfile:
     avg_goals: float
     gd_per_100: float
     draw_boost: float
+    lambda_floor: float = 0.15
     draw_gate: float = 0.42
     open_delo: float = 300.0
     dispersion: float = 5.0
@@ -88,6 +89,7 @@ GROUP_V37A = ModelProfile(
     avg_goals=mm.STAGE_PROFILES["group"]["avg_goals"],
     gd_per_100=mm.STAGE_PROFILES["group"]["gd_per_100"],
     draw_boost=mm.STAGE_PROFILES["group"]["draw_boost"],
+    lambda_floor=mm.STAGE_PROFILES["group"].get("lambda_floor", 0.15),
     open_delo=266.0,
     notes="Active frozen group-stage profile: v3.7A.",
 )
@@ -97,8 +99,9 @@ KNOCKOUT_LOCKED = ModelProfile(
     avg_goals=mm.STAGE_PROFILES["knockout"]["avg_goals"],
     gd_per_100=mm.STAGE_PROFILES["knockout"]["gd_per_100"],
     draw_boost=mm.STAGE_PROFILES["knockout"]["draw_boost"],
+    lambda_floor=mm.STAGE_PROFILES["knockout"].get("lambda_floor", 0.15),
     open_delo=266.0,
-    notes="Active locked knockout 90-minute profile; advancement uses the skill engine.",
+    notes="Active locked knockout 90-minute profile; v3.9 lambda_floor=0.30.",
 )
 
 LEGACY_V34 = ModelProfile(
@@ -183,7 +186,13 @@ def predict_match(
     ratings = elo_override if elo_override is not None else ELO
     eh = ratings[home] + (HOME if host_home else 0)
     ea = ratings[away]
-    lh, la = mm.elo_to_lambdas(eh, ea, avg_goals=profile.avg_goals, gd_per_100=profile.gd_per_100)
+    lh, la = mm.elo_to_lambdas(
+        eh,
+        ea,
+        avg_goals=profile.avg_goals,
+        gd_per_100=profile.gd_per_100,
+        floor=profile.lambda_floor,
+    )
     state_lineup_home = 1.0
     state_lineup_away = 1.0
     if competition_state is not None:

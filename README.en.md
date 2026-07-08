@@ -142,8 +142,9 @@ python3 generate_paper_signals.py \
 ```
 
 By default, `generate_paper_signals.py` uses prediction-side current Elo from
-`elo_current_jul7.py`. Group-stage labels select `group_v37a`; knockout labels
-such as `R32`, `R16`, `QF`, `SF`, and `final` select `knockout_locked`. Use
+`elo_current_jul8.py` (verified 7/7 base plus labelled K=60 estimates for
+post-7/7 matches). Group-stage labels select `group_v37a`; knockout labels such
+as `R32`, `R16`, `QF`, `SF`, and `final` select `knockout_locked`. Use
 `--elo-source snapshot` only for historical replay, not live paper trading.
 
 Default gates:

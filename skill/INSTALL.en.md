@@ -1,8 +1,8 @@
-# football-odds-model v3.8 Install Guide
+# football-odds-model v3.9 Install Guide
 
 [English](INSTALL.en.md) | [中文](INSTALL.zh-CN.md)
 
-This bundle packages the frozen v3.7A group-stage profile, the locked v3.8
+This bundle packages the frozen v3.7A group-stage profile, the locked v3.9
 knockout advancement profile, and the market-context pipeline. The core engine
 stays conservative; `competition_state` records qualified, eliminated,
 must-win, top-spot, and rotation-risk context without refitting core
@@ -19,10 +19,9 @@ Only three core defaults changed from older bundles:
 | `avg_goals` | 2.85 | **2.90** | Better O/U 2.5 calibration. |
 
 The 72-game group-stage regression locks the v3.7A profile. Knockout games are
-kept in a separate batch: as of 2026-07-07, `backtest_ko.py` validates KO n=22,
-advancement 17/22, advancement Brier 0.1742, and 90-minute RPS 0.1576. The
-graded-k knockout profile remains locked; n=22 is still monitor-only, not a
-refit trigger.
+kept in a separate batch: as of 2026-07-08, `backtest_ko.py` validates KO n=24,
+advancement 18/24, and 90-minute RPS 0.1502 under the v3.9 lambda floor. The
+graded-k knockout profile remains locked; flat-k is still monitor-only.
 
 ## Install
 
@@ -59,7 +58,7 @@ python3 test_jun26_results_scaffold.py
 Expected pass markers:
 
 - `ALL v3.6 REGRESSION CHECKS PASSED`
-- `KNOCKOUT BACKTEST — 22 game(s)`
+- `KNOCKOUT BACKTEST — 24 game(s)`
 - `ODDS_API_PIPELINE_REGRESSION PASS`
 - `COMPETITION_STATE_CONTEXT_REGRESSION PASS`
 - `JUN26_RESULTS_SCAFFOLD PASS`

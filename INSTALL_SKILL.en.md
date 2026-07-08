@@ -94,7 +94,7 @@ account data.
 
 ## Current Skill Version
 
-The current dev branch ships the v3.8 skill bundle: frozen v3.7A group-stage
-profile, locked graded-k knockout advancement profile, KO backtest n=22, and the
+The current dev branch ships the v3.9 skill bundle: frozen v3.7A group-stage
+profile, locked graded-k knockout advancement profile, KO backtest n=24, and the
 market-context pipeline. Paper-trading ledger tools stay repository-side and are
 not packaged as skill capabilities.

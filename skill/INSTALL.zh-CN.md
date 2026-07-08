@@ -1,8 +1,8 @@
-# football-odds-model v3.8 安装说明
+# football-odds-model v3.9 安装说明
 
 [English](INSTALL.en.md) | [中文](INSTALL.zh-CN.md)
 
-本包把冻结的 v3.7A 小组赛 profile、锁定的 v3.8 淘汰赛晋级 profile，以及市场
+本包把冻结的 v3.7A 小组赛 profile、锁定的 v3.9 淘汰赛晋级 profile，以及市场
 上下文管线一起打包。核心引擎保持保守；`competition_state` 状态层只记录已出线、
 已淘汰、必须赢、争小组第一和轮换风险，不重新拟合核心参数。
 
@@ -16,9 +16,9 @@
 | `draw_boost` | 0.07 | **0.06** | 模型平局率重新贴合 54 场样本。 |
 | `avg_goals` | 2.85 | **2.90** | 大小球 2.5 校准更好。 |
 
-72 场小组赛回归测试锁定 v3.7A profile。淘汰赛单独建批次：截至 2026-07-07，
-`backtest_ko.py` 校验 KO n=22，晋级判对 17/22，晋级 Brier 0.1742，90 分钟
-RPS 0.1576。graded-k 淘汰赛 profile 继续锁定；n=22 仍只监控，不触发重拟合。
+72 场小组赛回归测试锁定 v3.7A profile。淘汰赛单独建批次：截至 2026-07-08，
+`backtest_ko.py` 校验 KO n=24，晋级判对 18/24，v3.9 lambda floor 下 90 分钟
+RPS 0.1502。graded-k 淘汰赛 profile 继续锁定；flat-k 仍只监控。
 
 ## 安装
 
@@ -54,7 +54,7 @@ python3 test_jun26_results_scaffold.py
 预期通过标记：
 
 - `ALL v3.6 REGRESSION CHECKS PASSED`
-- `KNOCKOUT BACKTEST — 22 game(s)`
+- `KNOCKOUT BACKTEST — 24 game(s)`
 - `ODDS_API_PIPELINE_REGRESSION PASS`
 - `COMPETITION_STATE_CONTEXT_REGRESSION PASS`
 - `JUN26_RESULTS_SCAFFOLD PASS`

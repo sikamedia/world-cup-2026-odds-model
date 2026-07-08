@@ -89,6 +89,6 @@ export ODDS_API_SPORT_KEY="..."
 
 ## 当前 Skill 版本
 
-当前 dev 分支提供 v3.8 skill bundle：冻结的 v3.7A 小组赛 profile、锁定的
-graded-k 淘汰赛晋级 profile、KO 回测 n=22，以及市场上下文管线。paper-trading
+当前 dev 分支提供 v3.9 skill bundle：冻结的 v3.7A 小组赛 profile、锁定的
+graded-k 淘汰赛晋级 profile、KO 回测 n=24，以及市场上下文管线。paper-trading
 账本工具保留在仓库侧，不打包成 skill 能力。

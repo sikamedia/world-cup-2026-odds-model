@@ -30,7 +30,7 @@ from model_stability import GROUP_V37A, KNOCKOUT_LOCKED, PROFILE_REGISTRY, predi
 from team_aliases import resolve_team_name
 
 try:
-    from elo_current_jul7 import ELO_CURRENT, FETCHED as ELO_CURRENT_FETCHED
+    from elo_current_jul8 import ELO_CURRENT, FETCHED_BASE as ELO_CURRENT_FETCHED
 except Exception:  # pragma: no cover - optional prediction-side snapshot
     ELO_CURRENT = None
     ELO_CURRENT_FETCHED = "unavailable"
@@ -337,7 +337,7 @@ def main() -> None:
         "--elo-source",
         choices=["current", "snapshot"],
         default="current",
-        help="Prediction-side Elo source. Default current uses elo_current_jul7.py; snapshot uses backtest Elo.",
+        help="Prediction-side Elo source. Default current uses elo_current_jul8.py; snapshot uses backtest Elo.",
     )
     ap.add_argument(
         "--external-ratings-csv",

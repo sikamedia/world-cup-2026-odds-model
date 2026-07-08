@@ -138,10 +138,10 @@ python3 generate_paper_signals.py \
   --stage R16
 ```
 
-`generate_paper_signals.py` 默认使用 `elo_current_jul7.py` 里的预测侧当前 Elo。
-小组赛标签会选择 `group_v37a`；`R32`、`R16`、`QF`、`SF`、`final` 等淘汰赛
-标签会选择 `knockout_locked`。`--elo-source snapshot` 只用于历史回放，不用于
-实时模拟交易。
+`generate_paper_signals.py` 默认使用 `elo_current_jul8.py` 里的预测侧当前 Elo
+（7/7 已核验基线 + 7/7 后比赛的 K=60 估算，文件内已标注）。小组赛标签会选择
+`group_v37a`；`R32`、`R16`、`QF`、`SF`、`final` 等淘汰赛标签会选择
+`knockout_locked`。`--elo-source snapshot` 只用于历史回放，不用于实时模拟交易。
 
 默认闸门：
 
