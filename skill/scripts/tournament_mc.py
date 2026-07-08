@@ -79,7 +79,8 @@ def run(teams, N=40000, seed=42, ko_damp=None):
 
     def goals(ea, eb, n):
         la, lb = elo_to_lambdas(ea, eb, avg_goals=gprof["avg_goals"],
-                                gd_per_100=gprof["gd_per_100"])
+                                gd_per_100=gprof["gd_per_100"],
+                                floor=gprof.get("lambda_floor", 0.15))
         return rng.poisson(la, n), rng.poisson(lb, n)
 
     def ko(ia, ib, n):

@@ -26,7 +26,8 @@ import math
 # pen_tilt). Lower total goals (knockouts grind), no motivation/rotation.
 STAGE_PROFILES = {
     # FROZEN — do not change without re-running test_regression.py.
-    "group": dict(avg_goals=2.90, gd_per_100=0.65, draw_boost=0.06),
+    "group": dict(avg_goals=2.90, gd_per_100=0.65, draw_boost=0.06,
+                  lambda_floor=0.15),
     # LOCKED 2026-07-04 (pre-registered 7/3, confirmed on the FULL R32 n=16):
     # ΔElo-GRADED ko_regress k_eff = k_min + (k_max-k_min)*min(1,|dElo|/scale).
     # n=16 advancement Brier: graded(0.70->1.00/350) 0.1733 vs flat 0.70 0.1808.
@@ -36,9 +37,16 @@ STAGE_PROFILES = {
     # variance cushion at coin-flips, exactly where the upsets actually lived.
     # (flat 1.00 scored 0.1699 on this sample but throws the cushion away —
     # rejected: Argentina d495 was 1-1 at 90' and needed ET, the cushion is real.)
+    # lambda_floor 0.30 ADOPTED 2026-07-08 (v3.9; pre-registered at n=16,
+    # graded at the n=24 review; Argentina 3-2 Egypt natural experiment):
+    # floor 0.15 made a pinned underdog's "score 2" a ~1% event, but Egypt
+    # scored 2 and led to 79' — P(Egy>=2) 1.1% vs 3.8%, BTTS-yes logL -2.03 vs
+    # -1.42, P(3-2) 0.16% vs 0.54% all favour 0.30; the adv/RPS channels' small
+    # 0.15 edge was survivor bias (Argentina advanced anyway). Cost on adv
+    # Brier ~0.005. floor-0.15 stays as a SHADOW track for 2 rounds (QF+SF).
     "knockout": dict(avg_goals=2.70, gd_per_100=0.65, draw_boost=0.06,
                      ko_regress=0.70, ko_regress_max=1.00, ko_elo_scale=350.0,
-                     pen_tilt=0.20),
+                     pen_tilt=0.20, lambda_floor=0.30),
 }
 
 
@@ -165,13 +173,16 @@ def advancement(P, e_home, ko_regress=0.70, pen_tilt=0.20):
 
 
 def elo_to_lambdas(elo_h, elo_a, home_bump=0.0, avg_goals=2.90,
-                   gd_per_100=0.65):
-    """Convert Elo (+home advantage) into home/away expected goals."""
+                   gd_per_100=0.65, floor=0.15):
+    """Convert Elo (+home advantage) into home/away expected goals.
+
+    floor: minimum lambda for either side. Group profile 0.15 (frozen);
+    knockout profile 0.30 since v3.9 (see STAGE_PROFILES["knockout"])."""
     d = (elo_h + home_bump) - elo_a
     gd = d / 100.0 * gd_per_100          # expected goal difference
     base = avg_goals / 2.0
-    lh = max(0.15, base + gd / 2)
-    la = max(0.15, base - gd / 2)
+    lh = max(floor, base + gd / 2)
+    la = max(floor, base - gd / 2)
     return lh, la
 
 
@@ -249,6 +260,11 @@ def main():
     ap.add_argument("--draw-boost", type=float, default=None, dest="draw_boost",
                     help="inflate draw probability (profile default 0.06; "
                          "0 = pure Poisson). Corrects Poisson's draw under-count.")
+    ap.add_argument("--lambda-floor", type=float, default=None,
+                    dest="lambda_floor",
+                    help="minimum lambda per side (profile default: group 0.15, "
+                         "knockout 0.30 since v3.9; pass 0.15 for the KO shadow "
+                         "track)")
     args = ap.parse_args()
 
     # Resolve profile defaults for any param the user did not pass explicitly.
@@ -259,6 +275,8 @@ def main():
         args.gd_per_100 = prof["gd_per_100"]
     if args.draw_boost is None:
         args.draw_boost = prof["draw_boost"]
+    if args.lambda_floor is None:
+        args.lambda_floor = prof.get("lambda_floor", 0.15)
     ko_graded_note = None
     if args.ko_regress is None:
         args.ko_regress = prof.get("ko_regress", 0.70)
@@ -286,12 +304,14 @@ def main():
     if args.elo:
         lh, la = elo_to_lambdas(args.elo[0], args.elo[1], args.home,
                                 avg_goals=args.avg_goals,
-                                gd_per_100=args.gd_per_100)
+                                gd_per_100=args.gd_per_100,
+                                floor=args.lambda_floor)
         E = 1 / (1 + 10 ** (-((args.elo[0] + args.home) - args.elo[1]) / 400))
         e_home = E
         print(f"Elo: home {args.elo[0]} (+{args.home}) vs away {args.elo[1]} "
               f"-> E(home, incl draw)={E:.3f}")
-        print(f"Derived lambdas: home={lh:.2f}  away={la:.2f}")
+        print(f"Derived lambdas: home={lh:.2f}  away={la:.2f} "
+              f"(floor {args.lambda_floor:.2f})")
     elif args.lh is not None and args.la is not None:
         lh, la = args.lh, args.la
     else:
