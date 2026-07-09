@@ -195,7 +195,12 @@ file.
   saps stamina and lowers tempo → scale **total goals down ~5–10%** (mild 5% /
   moderate 8% / severe 10%) and expect more late subs/cramp; rain → slightly
   fewer goals, faster slicker pitch favouring ground play; cold/temperate or
-  retractable-roof/indoor → non-factor (say so). Do not assume — check.
+  retractable-roof/indoor → non-factor (say so). Do not assume — check. Weather
+  adjustments need auditable evidence in context: `kickoff_at_utc`,
+  `weather_checked_at_utc`, `weather_source`, `weather_evidence_type`, and
+  `weather_decision`. Use heat adjustments only from evidence checked within
+  6 hours of kickoff; keep storms as `rain_watch` unless hourly/radar evidence
+  within 3 hours of kickoff supports `rain_applied`.
 - **xG signal (in-tournament):** a team's matchday xG beats the scoreline as a
   strength read. High xG, few goals = profligacy → nudge λ up; low xG win =
   luck → nudge λ down. Blend prior Elo with observed xG (rough Bayesian update).
@@ -433,6 +438,9 @@ only has a hand-built CSV or a recorded fixture JSON.
 CSV format note: keep `competition_state` as one JSON text column for
 compatibility. Example:
 `{"home":{"mathematical_state":"qualified","stake_state":"advance","rotation_risk":"medium"},"away":{"mathematical_state":"eliminated","stake_state":"dead_rubber","rotation_risk":"high"}}`.
+Weather governance fields are optional but recommended whenever
+`weather_scale` changes: `kickoff_at_utc`, `weather_checked_at_utc`,
+`weather_source`, `weather_evidence_type`, and `weather_decision`.
 
 ## Data sources
 

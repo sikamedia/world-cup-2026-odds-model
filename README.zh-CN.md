@@ -122,6 +122,12 @@ export ODDS_API_SPORT_KEY="..."
 
 不要提交 API key、`.env` 文件或包含私有账号信息的录制 payload。
 
+天气调整属于可审计 context，不是模型参数。只要改动 `weather_scale`，就应在
+context CSV/JSON 里记录：`kickoff_at_utc`、`weather_checked_at_utc`、
+`weather_source`、`weather_evidence_type` 和 `weather_decision`。热调应基于
+开球前 6 小时内的证据；降雨在没有开球前 3 小时内 hourly/radar 证据前，只写
+`rain_watch`，不要写成 `rain_applied`。
+
 ## 模拟交易流程
 
 交易层目前**只做 paper trading**。它记录模型与市场之间的候选信号，不会执行

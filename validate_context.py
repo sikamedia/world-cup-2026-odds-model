@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import sys
 
 from competition_state import match_state_summary
@@ -79,6 +80,91 @@ def _add_issue(bucket: list[str], key: str, message: str) -> None:
     bucket.append(f"{key}: {message}")
 
 
+def _parse_utc_timestamp(raw: str | None, field: str) -> datetime | None:
+    if not raw:
+        return None
+    text = raw.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        value = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be ISO-8601, got {raw!r}") from exc
+    if value.tzinfo is None:
+        raise ValueError(f"{field} must include timezone, got {raw!r}")
+    return value.astimezone(timezone.utc)
+
+
+def _weather_evidence_age_hours(ctx) -> tuple[float | None, str | None]:
+    try:
+        kickoff = _parse_utc_timestamp(ctx.kickoff_at_utc, "kickoff_at_utc")
+        checked = _parse_utc_timestamp(ctx.weather_checked_at_utc, "weather_checked_at_utc")
+    except ValueError as exc:
+        return None, str(exc)
+    if kickoff is None or checked is None:
+        return None, None
+    return (kickoff - checked).total_seconds() / 3600.0, None
+
+
+def _validate_weather_evidence(key: str, ctx, warnings: list[str]) -> None:
+    decision = ctx.weather_decision or "none"
+    evidence_type = ctx.weather_evidence_type
+    weather_scale_changed = abs(ctx.weather_scale - 1.0) > 1e-9
+
+    if weather_scale_changed and not ctx.weather_checked_at_utc:
+        _add_issue(warnings, key, "weather_scale changed but weather_checked_at_utc is missing")
+    if decision != "none" and not ctx.weather_source:
+        _add_issue(warnings, key, f"weather_decision={decision} but weather_source is missing")
+
+    evidence_age_hours, error = _weather_evidence_age_hours(ctx)
+    if error:
+        _add_issue(warnings, key, error)
+        return
+    if ctx.weather_checked_at_utc and not ctx.kickoff_at_utc:
+        _add_issue(warnings, key, "weather_checked_at_utc present but kickoff_at_utc is missing")
+    if evidence_age_hours is not None and evidence_age_hours < 0:
+        _add_issue(warnings, key, f"weather_checked_at_utc is after kickoff by {-evidence_age_hours:.1f}h")
+
+    if decision == "rain_watch" and ctx.weather_scale < 1.0:
+        _add_issue(warnings, key, "rain_watch should not lower weather_scale; use rain_applied only with close evidence")
+    if decision == "indoor_no_weather" and weather_scale_changed:
+        _add_issue(warnings, key, "indoor_no_weather should keep weather_scale at 1.00")
+    if decision == "rain_applied":
+        if ctx.weather_scale >= 1.0:
+            _add_issue(warnings, key, "rain_applied should use weather_scale below 1.00")
+        if evidence_type not in {"hourly", "radar", "manual"}:
+            _add_issue(
+                warnings,
+                key,
+                "rain_applied requires weather_evidence_type hourly, radar, or manual",
+            )
+        if evidence_age_hours is None:
+            _add_issue(
+                warnings,
+                key,
+                "rain_applied requires kickoff_at_utc and weather_checked_at_utc",
+            )
+        elif evidence_age_hours > 3.0:
+            _add_issue(
+                warnings,
+                key,
+                f"rain_applied evidence is stale: checked {evidence_age_hours:.1f}h before kickoff (>3h)",
+            )
+    if decision.startswith("heat_"):
+        if evidence_age_hours is None:
+            _add_issue(
+                warnings,
+                key,
+                f"{decision} requires kickoff_at_utc and weather_checked_at_utc",
+            )
+        elif evidence_age_hours > 6.0:
+            _add_issue(
+                warnings,
+                key,
+                f"{decision} evidence is stale: checked {evidence_age_hours:.1f}h before kickoff (>6h)",
+            )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--context-file", required=True, help="JSON context file to validate.")
@@ -124,6 +210,7 @@ def main() -> None:
     source_keys = 0
     source_key_diff = 0
     competition_states = 0
+    weather_evidence_rows = 0
 
     for key, ctx in sorted(contexts.items()):
         if ctx.source_key:
@@ -132,6 +219,14 @@ def main() -> None:
                 source_key_diff += 1
         if ctx.competition_state is not None:
             competition_states += 1
+        if (
+            ctx.weather_decision != "none"
+            or ctx.weather_evidence_type is not None
+            or ctx.weather_checked_at_utc is not None
+            or ctx.kickoff_at_utc is not None
+            or ctx.weather_source is not None
+        ):
+            weather_evidence_rows += 1
         home, away = key.split("|", 1)
         if home not in ELO:
             _add_issue(errors, key, f"unknown home team '{home}'")
@@ -197,6 +292,7 @@ def main() -> None:
             _add_issue(warnings, key, f"lineup_away scale looks extreme: {ctx.lineup_away:.2f}")
         if not 0.80 <= ctx.weather_scale <= 1.05:
             _add_issue(warnings, key, f"weather_scale looks extreme: {ctx.weather_scale:.2f}")
+        _validate_weather_evidence(key, ctx, warnings)
         if ctx.competition_state is not None:
             summary = match_state_summary(ctx.competition_state)
             if "dead_rubber/high" in summary:
@@ -210,6 +306,8 @@ def main() -> None:
         print(f"source_key rows: {source_keys}  differing from canonical: {source_key_diff}")
     if competition_states:
         print(f"competition_state rows: {competition_states}")
+    if weather_evidence_rows:
+        print(f"weather_evidence rows: {weather_evidence_rows}")
     if margins:
         print(
             f"overround: avg={sum(margins) / len(margins) * 100:.1f}%  "

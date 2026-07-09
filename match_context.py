@@ -17,6 +17,16 @@ from competition_state import MatchCompetitionState, coerce_match_state
 from team_aliases import resolve_team_name
 
 DEMARGIN_METHODS = {"proportional", "power"}
+WEATHER_EVIDENCE_TYPES = {"point_forecast", "hourly", "radar", "official_roof", "manual"}
+WEATHER_DECISIONS = {
+    "none",
+    "heat_mild",
+    "heat_moderate",
+    "heat_severe",
+    "rain_watch",
+    "rain_applied",
+    "indoor_no_weather",
+}
 
 
 @dataclass(frozen=True)
@@ -26,6 +36,11 @@ class MatchContext:
     lineup_home: float = 1.0
     lineup_away: float = 1.0
     weather_scale: float = 1.0
+    kickoff_at_utc: str | None = None
+    weather_checked_at_utc: str | None = None
+    weather_source: str | None = None
+    weather_evidence_type: str | None = None
+    weather_decision: str = "none"
     market_confidence: float = 1.0
     competition_state: MatchCompetitionState | None = None
     source_key: str | None = None
@@ -120,6 +135,35 @@ def _coerce_positive_scale(raw: Any, field: str) -> float:
     return value
 
 
+def _coerce_optional_text(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _coerce_weather_evidence_type(raw: Any) -> str | None:
+    text = _coerce_optional_text(raw)
+    if text is None:
+        return None
+    value = text.lower().replace("-", "_")
+    if value not in WEATHER_EVIDENCE_TYPES:
+        allowed = ", ".join(sorted(WEATHER_EVIDENCE_TYPES))
+        raise ValueError(f"weather_evidence_type must be one of: {allowed}")
+    return value
+
+
+def _coerce_weather_decision(raw: Any) -> str:
+    text = _coerce_optional_text(raw)
+    if text is None:
+        return "none"
+    value = text.lower().replace("-", "_")
+    if value not in WEATHER_DECISIONS:
+        allowed = ", ".join(sorted(WEATHER_DECISIONS))
+        raise ValueError(f"weather_decision must be one of: {allowed}")
+    return value
+
+
 def _coerce_context(payload: Any) -> MatchContext:
     if payload is None:
         return MatchContext()
@@ -134,6 +178,11 @@ def _coerce_context(payload: Any) -> MatchContext:
         lineup_home=_coerce_positive_scale(payload.get("lineup_home", 1.0), "lineup_home"),
         lineup_away=_coerce_positive_scale(payload.get("lineup_away", 1.0), "lineup_away"),
         weather_scale=_coerce_positive_scale(payload.get("weather_scale", 1.0), "weather_scale"),
+        kickoff_at_utc=_coerce_optional_text(payload.get("kickoff_at_utc")),
+        weather_checked_at_utc=_coerce_optional_text(payload.get("weather_checked_at_utc")),
+        weather_source=_coerce_optional_text(payload.get("weather_source")),
+        weather_evidence_type=_coerce_weather_evidence_type(payload.get("weather_evidence_type")),
+        weather_decision=_coerce_weather_decision(payload.get("weather_decision")),
         market_confidence=_coerce_confidence(
             payload.get("market_confidence", payload.get("confidence", 1.0))
         ),

@@ -64,6 +64,7 @@ ROOT_PY = [
     "test_context_pipeline.py",
     "test_jun26_results_scaffold.py",
     "test_odds_api_pipeline.py",
+    "test_weather_evidence.py",
     "the_odds_api.py",
     "train_market_blend.py",
     "train_stable_profile.py",

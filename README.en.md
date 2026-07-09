@@ -125,6 +125,14 @@ export ODDS_API_SPORT_KEY="..."
 
 Do not commit API keys, `.env` files, or private recorded payloads.
 
+Weather adjustments are auditable context, not model parameters. When changing
+`weather_scale`, record the evidence fields in the context CSV/JSON:
+`kickoff_at_utc`, `weather_checked_at_utc`, `weather_source`,
+`weather_evidence_type`, and `weather_decision`. Heat adjustments should be
+based on evidence checked within 6 hours of kickoff. Rain should stay
+`rain_watch` unless hourly/radar evidence within 3 hours of kickoff supports
+`rain_applied`.
+
 ## Paper Trading Workflow
 
 The trading layer is **paper-only**. It records candidate model-vs-market
