@@ -125,13 +125,24 @@ export ODDS_API_SPORT_KEY="..."
 
 Do not commit API keys, `.env` files, or private recorded payloads.
 
-Weather adjustments are auditable context, not model parameters. When changing
-`weather_scale`, record the evidence fields in the context CSV/JSON:
-`kickoff_at_utc`, `weather_checked_at_utc`, `weather_source`,
-`weather_evidence_type`, and `weather_decision`. Heat adjustments should be
-based on evidence checked within 6 hours of kickoff. Rain should stay
-`rain_watch` unless hourly/radar evidence within 3 hours of kickoff supports
-`rain_applied`.
+Weather adjustments are auditable context, not model parameters. Current
+predictions must record kickoff/check/forecast issue and valid times, an
+HTTP(S) source, evidence type, evidence snapshot plus SHA-256, decision, and
+scale. Heat evidence must be checked within 6 hours and cover the kickoff hour;
+the forecast issue may be no more than 24 hours old when checked;
+`rain_applied` requires hourly/radar evidence within 3 hours. Missing or stale
+evidence is a blocking error, not a warning.
+
+Use `create_context_template.py --source qf_jul11 --fixture <slug>` to create
+one July 11 QF finalization template, then import the completed CSV with
+`--require-weather-evidence --context-only`. `predict_jul11.py finalize` writes
+a hashed, create-only artifact for exactly that fixture. After both independent
+finalizations, `predict_jul11.py mc` consumes their stored QF advancement
+probabilities and uses fresh validated Elo only for future rounds. See
+[AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md) for the external scheduler
+contract and finalization times.
+See [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md) for the tournament freeze,
+style-cohort, shootout, and home-advantage decision rules.
 
 ## Paper Trading Workflow
 
@@ -143,17 +154,19 @@ Generate conservative signals from a context JSON:
 ```bash
 python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
+  --elo-module elo_current_latest.py \
+  --elo-source-tsv evidence/World.tsv \
   --output-csv /tmp/paper_signals.csv \
   --append-ledger paper_bet_ledger.csv \
   --date 2026-07-05 \
   --stage R16
 ```
 
-By default, `generate_paper_signals.py` uses prediction-side current Elo from
-`elo_current_jul8.py` (verified 7/7 base plus labelled K=60 estimates for
-post-7/7 matches). Group-stage labels select `group_v37a`; knockout labels such
-as `R32`, `R16`, `QF`, `SF`, and `final` select `knockout_locked`. Use
-`--elo-source snapshot` only for historical replay, not live paper trading.
+By default, `generate_paper_signals.py` reads `elo_current_latest.py` and
+validates the exact World.tsv source, SHA-256, 24-hour freshness, required-team
+coverage, and `ESTIMATES=[]`. Any failure exits before a CSV is written.
+Group-stage labels select `group_v37a`; knockout labels select
+`knockout_locked`. Use `--elo-source snapshot` only for historical replay.
 
 Default gates:
 
@@ -168,6 +181,8 @@ audit file:
 ```bash
 python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
+  --elo-module elo_current_latest.py \
+  --elo-source-tsv evidence/World.tsv \
   --output-csv /tmp/paper_signals.csv \
   --date 2026-07-05 \
   --stage R16 \

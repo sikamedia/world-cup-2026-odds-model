@@ -75,19 +75,22 @@ description: >-
 >   vs 3.8%, BTTS-yes logL −2.03 vs −1.42, P(3-2) 0.16% vs 0.54%); the
 >   adv/RPS channels' small preference for 0.15 was survivor bias (Argentina
 >   advanced anyway; cost on adv Brier ~0.005). Group profile keeps 0.15
->   (frozen). floor-0.15 stays as a SHADOW line in `backtest_ko.py` for two
->   more rounds (QF+SF); rollback per pre-registration if it wins there.
+>   (frozen). floor-0.15 remains a prospective SHADOW after the n=24 baseline;
+>   only later floor-active fixtures identify a difference, with review at n=28.
 > - **Ensemble weight w = 0.6 model / 0.4 market — ADOPTED** (was 50:50).
 >   Unified ledger n=8: model Brier 0.1769 < market 0.1910; recomputed
 >   current-Elo 50:50 ensemble 0.1834. The CSV `p_ensemble` column contains one
->   `mixed_legacy` row from the stale-Elo/current-Elo transition, so the n=12
->   refit must filter/report by `basis`. Grid-fit optimum was w=1.0, but
+>   `mixed_legacy` row from the stale-Elo/current-Elo transition. A refit must
+>   use only unique, settled `live_current_elo` rows and waits for eligible
+>   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps.
+>   Grid-fit optimum was w=1.0, but
 >   3 of 8 games are market-wrong-side low-frequency events — half-step to 0.6.
-> - **graded-k HELD** (n=24: graded 0.1752 vs flat-1.00 0.1736 — gap halved
->   by the Swi-Col upset, exactly the designed buffer case; review at n=28).
+> - **graded-k HELD** (n=24: graded 0.1752 vs flat-1.00 0.1736). The paired
+>   uncertainty interval crosses zero; n=28 is monitoring only and the rule is
+>   frozen through the tournament.
 > - **draw_boost 0.06 HELD** (neutral KO backtest口径: model 90' draws 6.8
->   expected vs 6 actual on n=24; recheck at n=28 jointly with the
->   λ-floor interaction).
+>   expected vs 6 actual on n=24). At n=28, report the pre-registered
+>   `floor {0.15,0.30} x draw_boost {0.06,0.07}` 2x2 interaction.
 > - **Lineup rule codified: only adjust on OFFICIAL rulings** (confirmed
 >   absences/suspensions), never on rumours or "expected out" reports;
 >   re-verify suspensions match-day (Balogun overturn + Quansah lessons).
@@ -196,11 +199,12 @@ file.
   moderate 8% / severe 10%) and expect more late subs/cramp; rain → slightly
   fewer goals, faster slicker pitch favouring ground play; cold/temperate or
   retractable-roof/indoor → non-factor (say so). Do not assume — check. Weather
-  adjustments need auditable evidence in context: `kickoff_at_utc`,
-  `weather_checked_at_utc`, `weather_source`, `weather_evidence_type`, and
-  `weather_decision`. Use heat adjustments only from evidence checked within
-  6 hours of kickoff; keep storms as `rain_watch` unless hourly/radar evidence
-  within 3 hours of kickoff supports `rain_applied`.
+  adjustments need auditable context: kickoff/check/forecast issue and valid
+  times, HTTP(S) source, evidence type, evidence snapshot plus SHA-256,
+  `weather_decision`, and `weather_scale`. Heat evidence must be checked within
+  6 hours and cover the kickoff hour; forecast issue time must be within 24
+  hours of the check; applied rain requires hourly/radar evidence within 3
+  hours. Invalid evidence blocks current predictions.
 - **xG signal (in-tournament):** a team's matchday xG beats the scoreline as a
   strength read. High xG, few goals = profligacy → nudge λ up; low xG win =
   luck → nudge λ down. Blend prior Elo with observed xG (rough Bayesian update).
@@ -341,10 +345,24 @@ Single-match football has an irreducible floor; honest expectations:
 Run from the skill directory (numpy needed only for the Monte Carlo;
 `match_model.py` is pure-stdlib):
 
+- `python fetch_elo_current.py --tsv <World.tsv> --fetched-at-utc <ACTUAL_TIME>
+  --out elo_current_latest.py --required-team <TEAM> ...` creates a SHA-256-
+  labelled current Elo module. Saved TSV input requires its actual download
+  time; official paths reparse the raw TSV and fail closed on stale, missing,
+  mismatched, or estimated participant ratings.
+- `python predict_jul11.py finalize --fixture {norway-england,argentina-switzerland}
+  --elo-module <elo.py> --elo-source-tsv <World.tsv> --context-file <context.json>
+  --artifact-out <final.json>` finalizes exactly one pre-kickoff QF into a
+  create-only hashed artifact using frozen w=0.6 model / 0.4 market.
+- `python predict_jul11.py mc --artifacts <qf99.json> <qf100.json> --elo-module
+  <elo.py> --elo-source-tsv <World.tsv> --qf98-winner {Spain,Belgium}` consumes
+  the stored QF probabilities without recalculation; fresh Elo is used only for
+  future SF/final simulations and live match state is not incorporated. Follow
+  `AUTOMATION_RUNBOOK.md` for the two isolated finalization windows.
 - `python scripts/match_model.py --lh 1.95 --la 0.85 --odds 1.53 4.25 6.70`
   Pass λ directly, *or* `--elo 1891 1775 [--home 85]` to derive λ. Adjustment
   flags (applied after λ is set, with a printout of what changed):
-  - `--heat {mild,moderate,severe}` scale total goals 0.95/0.90/0.85
+  - `--heat {mild,moderate,severe}` scale total goals 0.95/0.92/0.90
   - `--rain` slick/low-scoring scale ~0.95
   - `--inj-home M` / `--inj-away M` multiply that team's λ (e.g. 0.90 = key
     player out; use the *opponent's* flag >1.0 or this side <1.0 as fits)
@@ -438,9 +456,9 @@ only has a hand-built CSV or a recorded fixture JSON.
 CSV format note: keep `competition_state` as one JSON text column for
 compatibility. Example:
 `{"home":{"mathematical_state":"qualified","stake_state":"advance","rotation_risk":"medium"},"away":{"mathematical_state":"eliminated","stake_state":"dead_rubber","rotation_risk":"high"}}`.
-Weather governance fields are optional but recommended whenever
-`weather_scale` changes: `kickoff_at_utc`, `weather_checked_at_utc`,
-`weather_source`, `weather_evidence_type`, and `weather_decision`.
+Weather provenance is mandatory for current predictions, including no-adjustment
+outdoor decisions. Historical replay may load legacy rows, but any asserted
+weather override must still pass `validate_weather_context`.
 
 ## Data sources
 

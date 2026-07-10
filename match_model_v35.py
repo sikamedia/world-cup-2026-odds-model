@@ -184,7 +184,7 @@ def main():
         ap.error("provide either --lh/--la or --elo HOME AWAY")
 
     notes = []
-    heat_scale = {"mild": 0.95, "moderate": 0.90, "severe": 0.85}
+    heat_scale = {"mild": 0.95, "moderate": 0.92, "severe": 0.90}
     if args.heat:
         s = heat_scale[args.heat]
         lh *= s; la *= s

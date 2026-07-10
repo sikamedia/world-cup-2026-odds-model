@@ -1,0 +1,5 @@
+date,stage,fixture_id,home,away,elo_home,elo_away,shootout_winner_side,elo_tilt_pick_side,pen_tilt,elo_tilt_probability,resolution_type,source
+2026-06-29,R32,2026-R32-Germany-Paraguay,Germany,Paraguay,1960,1730,A,H,0.20,0.558,shootout,worldcup_2026_data_ko.py
+2026-06-29,R32,2026-R32-Netherlands-Morocco,Netherlands,Morocco,1970,1860,A,H,0.20,0.531,shootout,worldcup_2026_data_ko.py
+2026-07-03,R32,2026-R32-Australia-Egypt,Australia,Egypt,1720,1628,A,H,0.20,0.526,shootout,worldcup_2026_data_ko.py
+2026-07-07,R16,2026-R16-Switzerland-Colombia,Switzerland,Colombia,1891,1982,H,A,0.20,0.526,shootout,worldcup_2026_data_ko.py

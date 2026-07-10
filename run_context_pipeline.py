@@ -22,7 +22,7 @@ from model_stability import resolve_profile
 
 
 ROOT = Path(__file__).resolve().parent
-TEMPLATE_SOURCES = ["jun25", "jun26", "stryktipset", "train", "validation", "locked_test", "all"]
+TEMPLATE_SOURCES = ["jun25", "jun26", "qf_jul11", "stryktipset", "train", "validation", "locked_test", "all"]
 
 
 def _script(name: str) -> Path:
@@ -164,6 +164,16 @@ def main() -> None:
         help="Fail validation on warnings, not just errors.",
     )
     ap.add_argument(
+        "--require-weather-evidence",
+        action="store_true",
+        help="Require complete matchday weather provenance on every row, including weather_scale=1.00.",
+    )
+    ap.add_argument(
+        "--context-only",
+        action="store_true",
+        help="Stop after import and validation; do not train, evaluate, or run a predictor.",
+    )
+    ap.add_argument(
         "--bootstrap",
         type=int,
         default=200,
@@ -190,7 +200,7 @@ def main() -> None:
         "--prediction-slate",
         choices=["auto", "jun25", "jun26"],
         default="auto",
-        help="Prediction script to run after validation. auto follows --fixture-source when possible.",
+        help="Prediction script to run after validation. qf_jul11 defaults to context-only validation.",
     )
     ap.add_argument(
         "--market-mode",
@@ -247,6 +257,8 @@ def main() -> None:
         ap.error("--input-csv and --fixture-source are mutually exclusive")
     if not args.input_csv and not args.fixture_source:
         ap.error("either --input-csv or --fixture-source is required")
+    if args.fixture_source == "qf_jul11" and args.prediction_slate != "auto":
+        ap.error("qf_jul11 cannot be handed to a June predictor; use --context-only")
 
     if args.fixture_source:
         source_csv = _generate_fixture_csv(args.fixture_source)
@@ -306,7 +318,18 @@ def main() -> None:
     ]
     if args.fail_on_warning:
         validate_cmd.append("--fail-on-warning")
+    if args.require_weather_evidence or args.fixture_source == "qf_jul11":
+        validate_cmd.append("--require-weather-evidence")
     _run_step("Validate context JSON", validate_cmd)
+
+    if args.context_only or args.fixture_source == "qf_jul11":
+        print(f"\nContext validation complete: context_json={output_json}")
+        print("Downstream training and prediction handoff skipped (context-only).")
+        return
+
+    prediction_slate = args.prediction_slate
+    if prediction_slate == "auto":
+        prediction_slate = "jun26" if args.fixture_source == "jun26" else "jun25"
 
     train_cmd = [
         sys.executable,
@@ -355,9 +378,6 @@ def main() -> None:
             market_cmd,
         )
 
-    prediction_slate = args.prediction_slate
-    if prediction_slate == "auto":
-        prediction_slate = "jun26" if args.fixture_source == "jun26" else "jun25"
     predict_script = "predict_jun26.py" if prediction_slate == "jun26" else "predict_jun25.py"
     predict_label = "June 26" if prediction_slate == "jun26" else "June 25"
     predict_cmd = [

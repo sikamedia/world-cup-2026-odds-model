@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import subprocess
 import sys
@@ -52,6 +53,35 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _weather(kickoff: str, checked: str) -> dict[str, object]:
+    snapshot = f"synthetic no-adjustment forecast for {kickoff}"
+    return {
+        "weather_scale": 1.0,
+        "kickoff_at_utc": kickoff,
+        "weather_checked_at_utc": checked,
+        "weather_forecast_issued_at_utc": checked,
+        "weather_forecast_valid_at_utc": kickoff,
+        "weather_source": "https://weather.example/hourly",
+        "weather_evidence_type": "hourly",
+        "weather_decision": "none",
+        "weather_evidence_snapshot": snapshot,
+        "weather_evidence_sha256": hashlib.sha256(snapshot.encode("utf-8")).hexdigest(),
+    }
+
+
+def _world_tsv() -> str:
+    rows = [
+        ("ES", 2177), ("AR", 2156), ("FR", 2143), ("EN", 2076),
+        ("BR", 2050), ("PT", 2040), ("CO", 2003), ("NL", 1995),
+        ("MX", 1980), ("CH", 1949), ("NO", 1972), ("BE", 1961),
+        ("DE", 1950), ("JP", 1930), ("MA", 1921), ("HR", 1910),
+    ]
+    return "".join(
+        f"{rank}\t{rank}\t{code}\t{rating}\n"
+        for rank, (code, rating) in enumerate(rows, start=1)
+    )
+
+
 def main() -> None:
     try:
         predict_match(KNOCKOUT_LOCKED, "France", "Morocco", elo_override={})
@@ -77,8 +107,24 @@ def main() -> None:
         ledger_csv = tmp / "ledger.csv"
         audited_signals_csv = tmp / "signals_audited.csv"
         external_ratings_csv = tmp / "external_ratings.csv"
+        elo_module = tmp / "elo_current_latest.py"
+        elo_source_tsv = tmp / "World.tsv"
         settled_csv = tmp / "settled.csv"
         results_csv = tmp / "results.csv"
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        elo_source_tsv.write_text(_world_tsv(), encoding="utf-8")
+        _run(
+            [
+                sys.executable,
+                "fetch_elo_current.py",
+                "--tsv",
+                str(elo_source_tsv),
+                "--out",
+                str(elo_module),
+                "--fetched-at-utc",
+                now.isoformat(),
+            ]
+        )
 
         france_odds, expected_selection = _market_probs_with_edge("France", "Morocco")
         norway_pred = predict_match(KNOCKOUT_LOCKED, "Norway", "England", elo_override=ELO_CURRENT)
@@ -94,12 +140,20 @@ def main() -> None:
                     "market_method": "proportional",
                     "market_confidence": 1.0,
                     "notes": "synthetic edge row",
+                    **_weather(
+                        (now + timedelta(hours=2)).isoformat(),
+                        (now - timedelta(minutes=1)).isoformat(),
+                    ),
                 },
                 "Norway|England": {
                     "market_odds": _odds_from_probs(norway_probs),
                     "market_method": "proportional",
                     "market_confidence": 1.0,
                     "notes": "synthetic no-edge row",
+                    **_weather(
+                        (now + timedelta(hours=3)).isoformat(),
+                        (now - timedelta(minutes=1)).isoformat(),
+                    ),
                 },
             },
         }
@@ -119,6 +173,10 @@ def main() -> None:
                 "2026-07-05",
                 "--stage",
                 "R16",
+                "--elo-module",
+                str(elo_module),
+                "--elo-source-tsv",
+                str(elo_source_tsv),
                 "--max-odds-age-minutes",
                 "60",
             ]
@@ -158,6 +216,10 @@ def main() -> None:
                 "2026-07-05",
                 "--stage",
                 "R16",
+                "--elo-module",
+                str(elo_module),
+                "--elo-source-tsv",
+                str(elo_source_tsv),
                 "--max-odds-age-minutes",
                 "60",
                 "--external-ratings-csv",

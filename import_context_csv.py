@@ -148,12 +148,30 @@ def _parse_row(row: dict[str, str], source_label: str) -> tuple[str, dict, str]:
     weather_checked_at_utc = _first_non_empty(row, ["weather_checked_at_utc", "weather_checked_utc"])
     if weather_checked_at_utc is not None:
         payload["weather_checked_at_utc"] = weather_checked_at_utc
+    weather_forecast_issued_at_utc = _first_non_empty(
+        row,
+        ["weather_forecast_issued_at_utc", "weather_forecast_issued_utc"],
+    )
+    if weather_forecast_issued_at_utc is not None:
+        payload["weather_forecast_issued_at_utc"] = weather_forecast_issued_at_utc
+    weather_forecast_valid_at_utc = _first_non_empty(
+        row,
+        ["weather_forecast_valid_at_utc", "weather_forecast_valid_utc"],
+    )
+    if weather_forecast_valid_at_utc is not None:
+        payload["weather_forecast_valid_at_utc"] = weather_forecast_valid_at_utc
     weather_source = _first_non_empty(row, ["weather_source", "weather_url"])
     if weather_source is not None:
         payload["weather_source"] = weather_source
     weather_evidence_type = _parse_weather_evidence_type(_first_non_empty(row, ["weather_evidence_type"]))
     if weather_evidence_type is not None:
         payload["weather_evidence_type"] = weather_evidence_type
+    weather_evidence_snapshot = row.get("weather_evidence_snapshot")
+    if weather_evidence_snapshot is not None and weather_evidence_snapshot.strip():
+        payload["weather_evidence_snapshot"] = weather_evidence_snapshot
+    weather_evidence_sha256 = _first_non_empty(row, ["weather_evidence_sha256"])
+    if weather_evidence_sha256 is not None:
+        payload["weather_evidence_sha256"] = weather_evidence_sha256
     weather_decision = _parse_weather_decision(_first_non_empty(row, ["weather_decision"]))
     if weather_decision is not None:
         payload["weather_decision"] = weather_decision

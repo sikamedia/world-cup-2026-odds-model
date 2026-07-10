@@ -49,6 +49,7 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("USA", "Belgium", 1, 4, "A", "R16"),           # De Ketelaere 9',32'; Tillman FK 31'; Vanaken 2H; Lukaku 90+'. Belgium rout at Lumen Seattle. Model BEL 52.9 adv RIGHT, market USA 51.6 WRONG (fan-money lean); pens-alert (32.9) didn't fire. Verified FIFA/ESPN/NPR/ussoccer 7/7.
     ("Argentina", "Egypt", 3, 2, "H", "R16"),      # Egypt led 2-0 (Yasser Ibrahim 15', Zico 67'); Romero 79', Messi 83', Enzo Fernandez 90+2' — ARG comeback in 90' (Mercedes-Benz Atlanta, roof closed). Salah started. Verified ESPN/FIFA/NBC/NPR/olympics.com 7/8.
     ("Switzerland", "Colombia", 0, 0, "H", "R16"),  # 0-0 after 120'; Switzerland 4-3 pens (Vargas winning kick) — first Swiss QF since 1954 (BC Place Vancouver). Pens-alert (32.4) FIRED and HIT; Elo pen tilt had COL 51.7. Verified ESPN/FIFA/FOX/CBS 7/8.
+    ("France", "Morocco", 2, 0, "H", "QF"),         # Mbappe 60' (20th career WC goal; missed 1H pen), Dembele 66'; shots 21-4, SOT 8-1 France. France to SF (Gillette Foxborough). Pre-reg 2-0 was model TOP scoreline (14.4%). Verified FIFA/ESPN/FOX/NBC/CNN 7/10.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA

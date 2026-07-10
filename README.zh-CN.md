@@ -122,11 +122,21 @@ export ODDS_API_SPORT_KEY="..."
 
 不要提交 API key、`.env` 文件或包含私有账号信息的录制 payload。
 
-天气调整属于可审计 context，不是模型参数。只要改动 `weather_scale`，就应在
-context CSV/JSON 里记录：`kickoff_at_utc`、`weather_checked_at_utc`、
-`weather_source`、`weather_evidence_type` 和 `weather_decision`。热调应基于
-开球前 6 小时内的证据；降雨在没有开球前 3 小时内 hourly/radar 证据前，只写
-`rain_watch`，不要写成 `rain_applied`。
+天气调整属于可审计 context，不是模型参数。当前预测必须记录开球/检查/预报
+签发与有效时间、HTTP(S) 来源、证据类型、证据正文及其 SHA-256、决策和缩放值。
+热调只接受开球前 6 小时内且覆盖开球小时的预报；签发时间距检查不得超过 24
+小时；`rain_applied` 只接受 3 小时内的 hourly/radar 证据。缺失或过期证据是
+阻断错误，不再只是 warning。
+
+7 月 11 日 QF 使用
+`create_context_template.py --source qf_jul11 --fixture <slug>` 分别生成单场
+模板，填入证据后以 `--require-weather-evidence --context-only` 导入验证。
+`predict_jul11.py finalize` 为该场写出带规范化哈希、不可覆盖的终版 artifact；
+两场分别定稿后，`predict_jul11.py mc` 只读取其中保存的 QF 晋级概率，新的经验证
+Elo 仅用于未来轮次。外部任务正文与终版运行时点见
+[AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md)。
+淘汰赛冻结、风格 cohort、点球和主场口径见
+[MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md)。
 
 ## 模拟交易流程
 
@@ -138,16 +148,18 @@ context CSV/JSON 里记录：`kickoff_at_utc`、`weather_checked_at_utc`、
 ```bash
 python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
+  --elo-module elo_current_latest.py \
+  --elo-source-tsv evidence/World.tsv \
   --output-csv /tmp/paper_signals.csv \
   --append-ledger paper_bet_ledger.csv \
   --date 2026-07-05 \
   --stage R16
 ```
 
-`generate_paper_signals.py` 默认使用 `elo_current_jul8.py` 里的预测侧当前 Elo
-（7/7 已核验基线 + 7/7 后比赛的 K=60 估算，文件内已标注）。小组赛标签会选择
-`group_v37a`；`R32`、`R16`、`QF`、`SF`、`final` 等淘汰赛标签会选择
-`knockout_locked`。`--elo-source snapshot` 只用于历史回放，不用于实时模拟交易。
+`generate_paper_signals.py` 默认从 `elo_current_latest.py` 读取预测侧 Elo，并强制
+校验 World.tsv 来源、SHA-256、24 小时新鲜度、目标球队覆盖和 `ESTIMATES=[]`。
+任何失败都会在写出 CSV 前退出。小组赛标签选择 `group_v37a`；淘汰赛标签选择
+`knockout_locked`。`--elo-source snapshot` 只用于历史回放。
 
 默认闸门：
 
@@ -161,6 +173,8 @@ python3 generate_paper_signals.py \
 ```bash
 python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
+  --elo-module elo_current_latest.py \
+  --elo-source-tsv evidence/World.tsv \
   --output-csv /tmp/paper_signals.csv \
   --date 2026-07-05 \
   --stage R16 \

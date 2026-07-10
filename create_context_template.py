@@ -16,6 +16,16 @@ from worldcup_2026_data import BATCH_SPLITS, JUNE_25_MATCHES, MATCHES_54, matche
 from worldcup_2026_data_jun26 import JUNE_26_COMPETITION_STATE, JUNE_26_MATCHES
 
 
+QF_JUL11_FIXTURES = (
+    ("Norway", "England", "2026-07-11T21:00:00Z"),
+    ("Argentina", "Switzerland", "2026-07-12T01:00:00Z"),
+)
+QF_JUL11_FIXTURE_KEYS = {
+    "norway-england": context_key("Norway", "England"),
+    "argentina-switzerland": context_key("Argentina", "Switzerland"),
+}
+
+
 def _base_payload(
     notes: str = "",
     odds=None,
@@ -31,8 +41,12 @@ def _base_payload(
         "weather_scale": 1.0,
         "kickoff_at_utc": None,
         "weather_checked_at_utc": None,
+        "weather_forecast_issued_at_utc": None,
+        "weather_forecast_valid_at_utc": None,
         "weather_source": None,
         "weather_evidence_type": None,
+        "weather_evidence_snapshot": None,
+        "weather_evidence_sha256": None,
         "weather_decision": "none",
         "market_confidence": 1.0,
         "competition_state": competition_state,
@@ -67,8 +81,12 @@ def _csv_rows(matches: dict[str, dict]) -> list[dict[str, object]]:
                 "weather_scale": payload.get("weather_scale", 1.0),
                 "kickoff_at_utc": payload.get("kickoff_at_utc") or "",
                 "weather_checked_at_utc": payload.get("weather_checked_at_utc") or "",
+                "weather_forecast_issued_at_utc": payload.get("weather_forecast_issued_at_utc") or "",
+                "weather_forecast_valid_at_utc": payload.get("weather_forecast_valid_at_utc") or "",
                 "weather_source": payload.get("weather_source") or "",
                 "weather_evidence_type": payload.get("weather_evidence_type") or "",
+                "weather_evidence_snapshot": payload.get("weather_evidence_snapshot") or "",
+                "weather_evidence_sha256": payload.get("weather_evidence_sha256") or "",
                 "weather_decision": payload.get("weather_decision", "none"),
                 "market_confidence": payload.get("market_confidence", 1.0),
                 "competition_state": (
@@ -97,8 +115,12 @@ def _write_csv(matches: dict[str, dict], handle) -> None:
         "weather_scale",
         "kickoff_at_utc",
         "weather_checked_at_utc",
+        "weather_forecast_issued_at_utc",
+        "weather_forecast_valid_at_utc",
         "weather_source",
         "weather_evidence_type",
+        "weather_evidence_snapshot",
+        "weather_evidence_sha256",
         "weather_decision",
         "market_confidence",
         "competition_state",
@@ -174,6 +196,20 @@ def _from_stryktipset(include_existing_odds: bool, market_method: str) -> dict:
     return matches
 
 
+def _from_qf_jul11(market_method: str) -> dict:
+    matches = {}
+    for home, away, kickoff_at_utc in QF_JUL11_FIXTURES:
+        _add_match(
+            matches,
+            home,
+            away,
+            notes="QF; official weather evidence required before prediction",
+            market_method=market_method,
+        )
+        matches[context_key(home, away)]["kickoff_at_utc"] = kickoff_at_utc
+    return matches
+
+
 def _from_split(split: str, market_method: str) -> dict:
     if split == "all":
         source = MATCHES_54
@@ -189,7 +225,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--source",
-        choices=["jun25", "jun26", "stryktipset", "train", "validation", "locked_test", "all"],
+        choices=["jun25", "jun26", "qf_jul11", "stryktipset", "train", "validation", "locked_test", "all"],
         default="jun25",
         help="Which slate/split to create a context template for.",
     )
@@ -210,6 +246,11 @@ def main() -> None:
         default="json",
         help="Output format. json keeps the current behavior; csv emits a fillable template for import_context_csv.py.",
     )
+    ap.add_argument(
+        "--fixture",
+        choices=sorted(QF_JUL11_FIXTURE_KEYS),
+        help="For qf_jul11, emit exactly one finalization fixture.",
+    )
     ap.add_argument("--output", help="Write the selected output format to this file. Defaults to stdout.")
     args = ap.parse_args()
 
@@ -217,10 +258,18 @@ def main() -> None:
         matches = _from_jun25(args.market_method)
     elif args.source == "jun26":
         matches = _from_jun26(args.market_method)
+    elif args.source == "qf_jul11":
+        matches = _from_qf_jul11(args.market_method)
     elif args.source == "stryktipset":
         matches = _from_stryktipset(args.include_existing_odds, args.market_method)
     else:
         matches = _from_split(args.source, args.market_method)
+
+    if args.fixture:
+        if args.source != "qf_jul11":
+            ap.error("--fixture is only valid with --source qf_jul11")
+        key = QF_JUL11_FIXTURE_KEYS[args.fixture]
+        matches = {key: matches[key]}
 
     if args.format == "json":
         payload = {

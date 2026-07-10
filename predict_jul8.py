@@ -197,7 +197,7 @@ print("=" * 68)
 
 def qf_predict(eh, ea, floor=0.30, heat=None):
     lh, la = lambdas_floor(eh, ea, floor)
-    scale = {"mild": 0.95, "moderate": 0.90, "severe": 0.85}.get(heat, 1.0)
+    scale = {"mild": 0.95, "moderate": 0.92, "severe": 0.90}.get(heat, 1.0)
     lh, la = lh * scale, la * scale
     return ko_from_lambdas(lh, la, eh - ea), lh, la
 
