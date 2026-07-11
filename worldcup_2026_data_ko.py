@@ -50,6 +50,7 @@ KO_RESULTS: list[tuple[str, str, int, int, str, str]] = [
     ("Argentina", "Egypt", 3, 2, "H", "R16"),      # Egypt led 2-0 (Yasser Ibrahim 15', Zico 67'); Romero 79', Messi 83', Enzo Fernandez 90+2' — ARG comeback in 90' (Mercedes-Benz Atlanta, roof closed). Salah started. Verified ESPN/FIFA/NBC/NPR/olympics.com 7/8.
     ("Switzerland", "Colombia", 0, 0, "H", "R16"),  # 0-0 after 120'; Switzerland 4-3 pens (Vargas winning kick) — first Swiss QF since 1954 (BC Place Vancouver). Pens-alert (32.4) FIRED and HIT; Elo pen tilt had COL 51.7. Verified ESPN/FIFA/FOX/CBS 7/8.
     ("France", "Morocco", 2, 0, "H", "QF"),         # Mbappe 60' (20th career WC goal; missed 1H pen), Dembele 66'; shots 21-4, SOT 8-1 France. France to SF (Gillette Foxborough). Pre-reg 2-0 was model TOP scoreline (14.4%). Verified FIFA/ESPN/FOX/NBC/CNN 7/10.
+    ("Spain", "Belgium", 2, 1, "H", "QF"),          # Fabian Ruiz 30' (rebound), De Ketelaere 40' (header), Merino 88' (sub 86', Lammens spill off Cubarsi shot — 3rd career super-sub rescue). Tielemans injured in WARM-UP (out); Courtois injured 2H (Lammens on). Spain to SF vs France. Low-block trigger NOT fired (Belgium lost). Verified ESPN/CNN/Yahoo/FOX 7/11.
 ]
 
 # Round of 32 — the 16 fixed ties, in OFFICIAL BRACKET-TREE LEAF ORDER (FIFA
