@@ -14,6 +14,10 @@ dependencies = []  # core + pipeline are pure standard library
 [project.optional-dependencies]
 # Only the skill's Monte-Carlo helper (skill/scripts/tournament_mc.py) needs numpy.
 sim = ["numpy>=1.21"]
+test = ["pytest>=7.4,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100

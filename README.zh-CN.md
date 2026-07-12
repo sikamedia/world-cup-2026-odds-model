@@ -229,17 +229,14 @@ python3 backtest_ko.py
 ./run_tests.sh
 ```
 
-或单独运行各项检查：
+安装 `test` 可选依赖后，也可以通过等价的 pytest 入口运行：
 
 ```bash
-python3 test_jun26_results_scaffold.py
-python3 test_competition_state_context.py
-python3 test_context_aliases.py
-python3 test_odds_api_pipeline.py
-python3 test_context_pipeline.py
-python3 test_bet_ledger_pipeline.py
-python3 skill/test_regression.py
+python3 -m pytest -q
 ```
+
+两个命令都会执行根目录下所有 `test_*.py` 脚本以及
+`skill/test_regression.py`。仍可直接运行单个脚本。
 
 ## Skill 安装
 

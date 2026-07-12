@@ -242,17 +242,15 @@ Run the whole active suite at once:
 ./run_tests.sh
 ```
 
-Or run the individual checks:
+With the `test` optional dependencies installed, the equivalent pytest entry
+point is:
 
 ```bash
-python3 test_jun26_results_scaffold.py
-python3 test_competition_state_context.py
-python3 test_context_aliases.py
-python3 test_odds_api_pipeline.py
-python3 test_context_pipeline.py
-python3 test_bet_ledger_pipeline.py
-python3 skill/test_regression.py
+python3 -m pytest -q
 ```
+
+Both commands execute every root `test_*.py` script plus
+`skill/test_regression.py`. Individual scripts can still be run directly.
 
 ## Skill Installation
 
