@@ -25,3 +25,5 @@ Educational/analytical use only; not betting advice.
 - [Full-bracket Monte Carlo](predict_bracket.py)
 - [72-match group-stage backtest](backtest_72.py)
 - [Knockout-stage backtest](backtest_ko.py)
+- [Official automation runbook](AUTOMATION_RUNBOOK.md)
+- [Knockout model governance](MODEL_GOVERNANCE.md)

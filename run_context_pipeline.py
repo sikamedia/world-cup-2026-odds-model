@@ -18,11 +18,23 @@ import sys
 import tempfile
 from pathlib import Path
 
+from create_context_template import FINALIZATION_FIXTURE_KEYS_BY_SOURCE
 from model_stability import resolve_profile
 
 
 ROOT = Path(__file__).resolve().parent
-TEMPLATE_SOURCES = ["jun25", "jun26", "stryktipset", "train", "validation", "locked_test", "all"]
+TEMPLATE_SOURCES = [
+    "jun25",
+    "jun26",
+    "qf_jul11",
+    "sf_jul14_15",
+    "stryktipset",
+    "train",
+    "validation",
+    "locked_test",
+    "all",
+]
+FINALIZATION_SOURCES = frozenset(FINALIZATION_FIXTURE_KEYS_BY_SOURCE)
 
 
 def _script(name: str) -> Path:
@@ -68,7 +80,7 @@ def _temp_file_path(prefix: str, suffix: str) -> Path:
         handle.close()
 
 
-def _generate_fixture_csv(source: str) -> Path:
+def _generate_fixture_csv(source: str, fixture: str | None = None) -> Path:
     output_csv = _temp_file_path(f"worldcup_{source}_", ".csv")
     cmd = [
         sys.executable,
@@ -80,6 +92,8 @@ def _generate_fixture_csv(source: str) -> Path:
         "--output",
         str(output_csv),
     ]
+    if fixture:
+        cmd.extend(["--fixture", fixture])
     _run_step("Generate fixture CSV", cmd)
     return output_csv
 
@@ -149,6 +163,15 @@ def main() -> None:
         choices=TEMPLATE_SOURCES,
         help="Generate a template CSV with create_context_template.py before import.",
     )
+    ap.add_argument(
+        "--fixture",
+        choices=sorted(
+            fixture
+            for fixture_keys in FINALIZATION_FIXTURE_KEYS_BY_SOURCE.values()
+            for fixture in fixture_keys
+        ),
+        help="Generate one fixture from a QF/SF finalization source.",
+    )
     ap.add_argument("--base-json", help="Optional existing JSON context file to merge into.")
     ap.add_argument(
         "--output-json",
@@ -162,6 +185,16 @@ def main() -> None:
         "--fail-on-warning",
         action="store_true",
         help="Fail validation on warnings, not just errors.",
+    )
+    ap.add_argument(
+        "--require-weather-evidence",
+        action="store_true",
+        help="Require complete matchday weather provenance on every row, including weather_scale=1.00.",
+    )
+    ap.add_argument(
+        "--context-only",
+        action="store_true",
+        help="Stop after import and validation; do not train, evaluate, or run a predictor.",
     )
     ap.add_argument(
         "--bootstrap",
@@ -190,7 +223,7 @@ def main() -> None:
         "--prediction-slate",
         choices=["auto", "jun25", "jun26"],
         default="auto",
-        help="Prediction script to run after validation. auto follows --fixture-source when possible.",
+        help="Prediction script to run after validation. Finalization sources are context-only.",
     )
     ap.add_argument(
         "--market-mode",
@@ -247,13 +280,26 @@ def main() -> None:
         ap.error("--input-csv and --fixture-source are mutually exclusive")
     if not args.input_csv and not args.fixture_source:
         ap.error("either --input-csv or --fixture-source is required")
+    if args.fixture and not args.fixture_source:
+        ap.error("--fixture requires --fixture-source")
+    if args.fixture:
+        fixture_keys = FINALIZATION_FIXTURE_KEYS_BY_SOURCE.get(args.fixture_source)
+        if fixture_keys is None or args.fixture not in fixture_keys:
+            ap.error(f"--fixture {args.fixture!r} is not valid for {args.fixture_source}")
+    if args.fixture_source in FINALIZATION_SOURCES and args.prediction_slate != "auto":
+        ap.error(f"{args.fixture_source} cannot be handed to a June predictor; use --context-only")
 
     if args.fixture_source:
-        source_csv = _generate_fixture_csv(args.fixture_source)
-        source_label = args.source_label or (
-            f"odds-api:{args.fixture_source}" if args.market_source == "odds-api" else f"template:{args.fixture_source}"
+        source_csv = _generate_fixture_csv(args.fixture_source, args.fixture)
+        fixture_label = ":".join(
+            part for part in (args.fixture_source, args.fixture) if part
         )
-        context_stem = args.fixture_source
+        source_label = args.source_label or (
+            f"odds-api:{fixture_label}"
+            if args.market_source == "odds-api"
+            else f"template:{fixture_label}"
+        )
+        context_stem = "_".join(part for part in (args.fixture_source, args.fixture) if part)
     else:
         source_csv = Path(args.input_csv)
         source_label = args.source_label
@@ -306,7 +352,18 @@ def main() -> None:
     ]
     if args.fail_on_warning:
         validate_cmd.append("--fail-on-warning")
+    if args.require_weather_evidence or args.fixture_source in FINALIZATION_SOURCES:
+        validate_cmd.append("--require-weather-evidence")
     _run_step("Validate context JSON", validate_cmd)
+
+    if args.context_only or args.fixture_source in FINALIZATION_SOURCES:
+        print(f"\nContext validation complete: context_json={output_json}")
+        print("Downstream training and prediction handoff skipped (context-only).")
+        return
+
+    prediction_slate = args.prediction_slate
+    if prediction_slate == "auto":
+        prediction_slate = "jun26" if args.fixture_source == "jun26" else "jun25"
 
     train_cmd = [
         sys.executable,
@@ -355,9 +412,6 @@ def main() -> None:
             market_cmd,
         )
 
-    prediction_slate = args.prediction_slate
-    if prediction_slate == "auto":
-        prediction_slate = "jun26" if args.fixture_source == "jun26" else "jun25"
     predict_script = "predict_jun26.py" if prediction_slate == "jun26" else "predict_jun25.py"
     predict_label = "June 26" if prediction_slate == "jun26" else "June 25"
     predict_cmd = [

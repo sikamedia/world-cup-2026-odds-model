@@ -22,7 +22,7 @@ from competition_state import match_adjustments
 from match_context import de_margin_odds, market_gap
 from worldcup_2026_data import ELO, HOME, split_matches
 
-HEAT_SCALE = {"none": 1.0, "mild": 0.95, "moderate": 0.90, "severe": 0.85}
+HEAT_SCALE = {"none": 1.0, "mild": 0.95, "moderate": 0.92, "severe": 0.90}
 MOT_SCALE = {"normal": 1.0, "through": 0.88, "eliminated": 0.90, "mustwin": 1.06}
 
 
@@ -183,6 +183,10 @@ def predict_match(
     competition_state=None,
     elo_override: Mapping[str, float] | None = None,
 ) -> Prediction:
+    if heat != "none" and abs(weather_scale - 1.0) > 1e-9:
+        raise ValueError(
+            "legacy heat and weather_scale cannot be combined; use one weather adjustment path"
+        )
     ratings = elo_override if elo_override is not None else ELO
     eh = ratings[home] + (HOME if host_home else 0)
     ea = ratings[away]

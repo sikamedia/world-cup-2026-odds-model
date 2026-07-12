@@ -43,6 +43,8 @@ football-odds-model/
 |-- competition_state.py
 |-- match_context.py
 |-- model_stability.py
+|-- pyproject.toml
+|-- tests/test_active_scripts.py
 |-- worldcup_2026_data.py
 |-- worldcup_2026_data_jun26.py
 |-- run_context_pipeline.py
@@ -52,10 +54,8 @@ football-odds-model/
 进入该 skill 目录后运行验证：
 
 ```bash
-python3 test_regression.py
-python3 test_odds_api_pipeline.py
-python3 test_competition_state_context.py
-python3 test_jun26_results_scaffold.py
+./run_tests.sh
+python3 -m pytest -q
 ```
 
 ## 直接运行 Skill 脚本
@@ -85,10 +85,10 @@ export ODDS_API_SPORT_KEY="..."
 1. 运行 `python3 build_skill.py` 重新生成 `football-odds-model.skill`。
 2. 在界面中重新导入 `.skill` 文件，或用新构建的 `dist/football-odds-model/`
    替换手动安装的 `football-odds-model/` 目录。
-3. 运行上面的四个验证命令。
+3. 运行上面的两套测试入口。
 
 ## 当前 Skill 版本
 
 当前 dev 分支提供 v3.9 skill bundle：冻结的 v3.7A 小组赛 profile、锁定的
-graded-k 淘汰赛晋级 profile、KO 回测 n=24，以及市场上下文管线。paper-trading
-账本工具保留在仓库侧，不打包成 skill 能力。
+graded-k 淘汰赛晋级 profile、KO n=28 监控，以及半决赛 fail-closed
+finalization。paper-trading 账本工具保留在仓库侧，不打包成 skill 能力。

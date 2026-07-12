@@ -58,6 +58,29 @@ def _parse_odds(row: dict[str, str]) -> list[float] | None:
     return [float(home), float(draw), float(away)]
 
 
+def _parse_advance_odds(row: dict[str, str]) -> list[float] | None:
+    raw = _first_non_empty(row, ["market_advance_odds", "advance_odds"])
+    if raw is not None:
+        parts = [part.strip() for part in raw.replace("|", "/").split("/") if part.strip()]
+        if len(parts) != 2:
+            raise ValueError("market_advance_odds must contain 2 values")
+        return [float(part) for part in parts]
+
+    home = _first_non_empty(
+        row,
+        ["market_advance_home", "advance_home_odds", "odds_advance_home"],
+    )
+    away = _first_non_empty(
+        row,
+        ["market_advance_away", "advance_away_odds", "odds_advance_away"],
+    )
+    if home is None and away is None:
+        return None
+    if home is None or away is None:
+        raise ValueError("both advancement odds columns are required when using split fields")
+    return [float(home), float(away)]
+
+
 def _parse_key(row: dict[str, str], source_label: str) -> tuple[str, str]:
     raw_key = _first_non_empty(row, ["match", "fixture", "key", "context_key"])
     if raw_key is not None:
@@ -89,6 +112,43 @@ def _parse_optional_float(row: dict[str, str], keys: list[str], field: str) -> f
         raise ValueError(f"{field} must be numeric: {raw!r}") from exc
 
 
+def _parse_weather_evidence_type(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip().lower().replace("-", "_")
+    allowed = {"point_forecast", "hourly", "radar", "official_roof", "manual"}
+    if value not in allowed:
+        raise ValueError(f"weather_evidence_type must be one of: {', '.join(sorted(allowed))}")
+    return value
+
+
+def _parse_weather_decision(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip().lower().replace("-", "_")
+    allowed = {
+        "none",
+        "heat_mild",
+        "heat_moderate",
+        "heat_severe",
+        "rain_watch",
+        "rain_applied",
+        "indoor_no_weather",
+    }
+    if value not in allowed:
+        raise ValueError(f"weather_decision must be one of: {', '.join(sorted(allowed))}")
+    return value
+
+
+def _parse_roof_status(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip().lower().replace("-", "_")
+    if value not in {"closed", "open"}:
+        raise ValueError("roof_status must be closed or open")
+    return value
+
+
 def _parse_competition_state(row: dict[str, str]) -> dict | None:
     raw = _first_non_empty(row, ["competition_state"])
     if raw is None:
@@ -102,6 +162,9 @@ def _parse_row(row: dict[str, str], source_label: str) -> tuple[str, dict, str]:
     odds = _parse_odds(row)
     if odds is not None:
         payload["market_odds"] = odds
+    advance_odds = _parse_advance_odds(row)
+    if advance_odds is not None:
+        payload["market_advance_odds"] = advance_odds
     market_method = _parse_market_method(_first_non_empty(row, ["market_method", "demargin"]))
     if market_method is not None:
         payload["market_method"] = market_method
@@ -114,6 +177,48 @@ def _parse_row(row: dict[str, str], source_label: str) -> tuple[str, dict, str]:
     weather_scale = _parse_optional_float(row, ["weather_scale"], "weather_scale")
     if weather_scale is not None:
         payload["weather_scale"] = weather_scale
+    kickoff_at_utc = _first_non_empty(row, ["kickoff_at_utc", "kickoff_utc"])
+    if kickoff_at_utc is not None:
+        payload["kickoff_at_utc"] = kickoff_at_utc
+    weather_checked_at_utc = _first_non_empty(row, ["weather_checked_at_utc", "weather_checked_utc"])
+    if weather_checked_at_utc is not None:
+        payload["weather_checked_at_utc"] = weather_checked_at_utc
+    weather_forecast_issued_at_utc = _first_non_empty(
+        row,
+        ["weather_forecast_issued_at_utc", "weather_forecast_issued_utc"],
+    )
+    if weather_forecast_issued_at_utc is not None:
+        payload["weather_forecast_issued_at_utc"] = weather_forecast_issued_at_utc
+    weather_forecast_valid_at_utc = _first_non_empty(
+        row,
+        ["weather_forecast_valid_at_utc", "weather_forecast_valid_utc"],
+    )
+    if weather_forecast_valid_at_utc is not None:
+        payload["weather_forecast_valid_at_utc"] = weather_forecast_valid_at_utc
+    weather_source = _first_non_empty(row, ["weather_source", "weather_url"])
+    if weather_source is not None:
+        payload["weather_source"] = weather_source
+    weather_evidence_type = _parse_weather_evidence_type(_first_non_empty(row, ["weather_evidence_type"]))
+    if weather_evidence_type is not None:
+        payload["weather_evidence_type"] = weather_evidence_type
+    roof_status = _parse_roof_status(_first_non_empty(row, ["roof_status"]))
+    if roof_status is not None:
+        payload["roof_status"] = roof_status
+    weather_evidence_fixture_id = _first_non_empty(
+        row,
+        ["weather_evidence_fixture_id", "roof_evidence_fixture_id"],
+    )
+    if weather_evidence_fixture_id is not None:
+        payload["weather_evidence_fixture_id"] = weather_evidence_fixture_id
+    weather_evidence_snapshot = row.get("weather_evidence_snapshot")
+    if weather_evidence_snapshot is not None and weather_evidence_snapshot.strip():
+        payload["weather_evidence_snapshot"] = weather_evidence_snapshot
+    weather_evidence_sha256 = _first_non_empty(row, ["weather_evidence_sha256"])
+    if weather_evidence_sha256 is not None:
+        payload["weather_evidence_sha256"] = weather_evidence_sha256
+    weather_decision = _parse_weather_decision(_first_non_empty(row, ["weather_decision"]))
+    if weather_decision is not None:
+        payload["weather_decision"] = weather_decision
     market_confidence = _parse_optional_float(row, ["market_confidence", "confidence"], "market_confidence")
     if market_confidence is not None:
         payload["market_confidence"] = market_confidence

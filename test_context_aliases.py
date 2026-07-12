@@ -9,10 +9,20 @@ import sys
 import tempfile
 from pathlib import Path
 
-from match_context import context_key, load_context_file
+from match_context import (
+    MatchContext,
+    context_key,
+    de_margin_odds,
+    de_margin_two_way_odds,
+    load_context_file,
+)
 
 
 def main() -> None:
+    positional_context = MatchContext((1.8, 3.4, 4.5), "power")
+    assert positional_context.market_method == "power"
+    assert positional_context.market_advance_odds is None
+
     assert context_key("United States", "Turkey") == "USA|Turkiye"
     assert context_key("Côte d'Ivoire", "Curaçao") == "Cote dIvoire|Curacao"
 
@@ -25,9 +35,9 @@ def main() -> None:
     csv_path.write_text(
         "\n".join(
             [
-                "home,away,market_home,market_draw,market_away,market_method,market_confidence,notes",
-                "United States,Turkey,1.65,3.60,5.50,power,0.8,alias csv",
-                "Curacao,Cote d'Ivoire,1.30,4.80,9.00,proportional,1.0,accent csv",
+                "home,away,market_home,market_draw,market_away,market_advance_home,market_advance_away,market_method,market_confidence,notes",
+                "United States,Turkey,1.65,3.60,5.50,1.75,2.15,power,0.8,alias csv",
+                "Curacao,Cote d'Ivoire,1.30,4.80,9.00,,,proportional,1.0,accent csv",
             ]
         )
         + "\n",
@@ -42,6 +52,7 @@ def main() -> None:
     assert "USA|Turkiye" in data["matches"]
     assert "Curacao|Cote dIvoire" in data["matches"]
     assert data["matches"]["USA|Turkiye"]["market_method"] == "power"
+    assert data["matches"]["USA|Turkiye"]["market_advance_odds"] == [1.75, 2.15]
     assert data["matches"]["USA|Turkiye"]["source_key"] == "United States|Turkey"
     assert data["matches"]["Curacao|Cote dIvoire"]["source_key"] == "Curacao|Cote d'Ivoire"
 
@@ -55,6 +66,7 @@ def main() -> None:
                 "matches": {
                     "USA|Turkiye": {
                         "market_odds": [1.70, 3.55, 5.10],
+                        "market_advance_odds": [1.80, 2.10],
                         "market_method": "power",
                         "lineup_home": 0.92,
                         "lineup_away": 1.08,
@@ -97,6 +109,7 @@ def main() -> None:
     merged = json.loads(merged_json.read_text(encoding="utf-8"))
     merged_row = merged["matches"]["USA|Turkiye"]
     assert merged_row["market_odds"] == [1.65, 3.60, 5.50]
+    assert merged_row["market_advance_odds"] == [1.80, 2.10]
     assert merged_row["market_method"] == "power"
     assert merged_row["lineup_home"] == 0.92
     assert merged_row["lineup_away"] == 1.08
@@ -122,6 +135,27 @@ def main() -> None:
     template_header = template_csv.read_text(encoding="utf-8").splitlines()[0]
     assert "source_key" in template_header
     assert "market_home" in template_header
+    assert "market_advance_odds" in template_header
+    assert "market_advance_home" in template_header
+
+    partial_advance_csv = tmp / "context_partial_advance.csv"
+    partial_advance_csv.write_text(
+        "home,away,market_advance_home\nFrance,Spain,1.70\n",
+        encoding="utf-8",
+    )
+    partial_advance = subprocess.run(
+        [
+            sys.executable,
+            "import_context_csv.py",
+            "--input",
+            str(partial_advance_csv),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert partial_advance.returncode != 0
+    assert "both advancement odds columns are required" in partial_advance.stderr
 
     manual_json.write_text(
         json.dumps(
@@ -129,6 +163,7 @@ def main() -> None:
                 "matches": {
                     "United States|Turkey": {
                         "market_odds": [1.65, 3.60, 5.50],
+                        "market_advance_odds": [1.75, 2.15],
                         "market_method": "power",
                         "source_key": "United States|Turkey",
                     },
@@ -146,7 +181,25 @@ def main() -> None:
     assert "USA|Turkiye" in contexts
     assert "Cote dIvoire|Curacao" in contexts
     assert contexts["USA|Turkiye"].market_method == "power"
+    assert contexts["USA|Turkiye"].market_advance_odds == (1.75, 2.15)
     assert contexts["USA|Turkiye"].source_key == "United States|Turkey"
+    assert contexts["Cote dIvoire|Curacao"].market_advance_odds is None
+
+    advance_probs, advance_margin = de_margin_two_way_odds((1.75, 2.15), method="power")
+    assert abs(sum(advance_probs) - 1.0) < 1e-12
+    assert advance_margin > 0.0
+    for invalid_odds, demargin in (
+        ((float("nan"), 2.0), de_margin_two_way_odds),
+        ((2.0, float("inf")), de_margin_two_way_odds),
+        ((2.0, 3.0, float("nan")), de_margin_odds),
+        ((2.0, float("inf"), 4.0), de_margin_odds),
+    ):
+        try:
+            demargin(invalid_odds)
+        except ValueError as exc:
+            assert "finite and greater than 1.0" in str(exc)
+        else:
+            raise AssertionError(f"accepted non-finite odds: {invalid_odds}")
 
     subprocess.run([sys.executable, "validate_context.py", "--context-file", str(json_path)], check=True)
     print("ALIAS_CONTEXT_REGRESSION PASS")

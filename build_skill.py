@@ -15,6 +15,7 @@ Run: ``python3 build_skill.py``
 from __future__ import annotations
 
 import shutil
+import stat
 import zipfile
 from pathlib import Path
 
@@ -24,6 +25,7 @@ DIST = REPO / "dist"
 STAGE = DIST / SKILL_NAME
 SKILL_FILE = REPO / f"{SKILL_NAME}.skill"
 SKILL_DIR = REPO / "skill"
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 # Active root files shipped inside the skill (model + pipeline + tests).
 # Excludes archived history (match_model_v33/v34, now under archive/) and the
@@ -34,12 +36,20 @@ SKILL_DIR = REPO / "skill"
 # anyone what to bet"; the paper ledger is project-side calibration
 # infrastructure and must not ship as a skill capability.
 ROOT_PY = [
+    "pyproject.toml",
+    "AUTOMATION_RUNBOOK.md",
+    "MODEL_GOVERNANCE.md",
     "backtest_66.py",
     "backtest_72.py",
     "backtest_ko.py",
     "experiment_graded_k.py",
+    "elo_snapshot.py",
+    "ensemble_ledger.csv",
     "fetch_elo_current.py",
+    "home_advantage_ledger.csv",
+    "model_governance.py",
     "predict_bracket.py",
+    "predict_jul11.py",
     "predict_r16_bracket.py",
     "predict_r32.py",
     "team_news.py",
@@ -57,13 +67,21 @@ ROOT_PY = [
     "predict_jun25.py",
     "predict_jun26.py",
     "predict_stryktipset_8.py",
+    "run_tests.sh",
     "run_context_pipeline.py",
+    "shootout_ledger.csv",
+    "style_divergence_ledger.csv",
     "team_aliases.py",
     "test_competition_state_context.py",
     "test_context_aliases.py",
     "test_context_pipeline.py",
+    "test_elo_provenance.py",
     "test_jun26_results_scaffold.py",
     "test_odds_api_pipeline.py",
+    "test_model_governance.py",
+    "test_predict_jul11.py",
+    "test_weather_evidence.py",
+    "tests/test_active_scripts.py",
     "the_odds_api.py",
     "train_market_blend.py",
     "train_stable_profile.py",
@@ -75,6 +93,15 @@ ROOT_PY = [
 
 def _is_cache(path: Path) -> bool:
     return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
+
+
+def _zip_info(path: Path, archive_name: Path) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(archive_name.as_posix(), date_time=ZIP_TIMESTAMP)
+    info.compress_type = zipfile.ZIP_STORED
+    info.create_system = 3
+    permissions = 0o755 if path.stat().st_mode & stat.S_IXUSR else 0o644
+    info.external_attr = (stat.S_IFREG | permissions) << 16
+    return info
 
 
 def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
@@ -95,7 +122,9 @@ def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
         src = REPO / name
         if not src.exists():
             raise SystemExit(f"manifest error: missing root file {name}")
-        shutil.copy2(src, stage / name)
+        dst = stage / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
     # 2) skill-only assets, copied verbatim into the bundle root
     if not SKILL_DIR.is_dir():
@@ -122,13 +151,17 @@ def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
             out = alt
     with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
         for path in sorted(stage.rglob("*")):
-            if _is_cache(path):
+            if _is_cache(path) or not path.is_file():
                 continue
-            zf.write(path, Path(SKILL_NAME) / path.relative_to(stage))
+            archive_name = Path(SKILL_NAME) / path.relative_to(stage)
+            zf.writestr(_zip_info(path, archive_name), path.read_bytes())
 
     n_files = sum(1 for p in stage.rglob("*") if p.is_file())
-    print(f"built {out.name}: {n_files} files staged in "
-          f"{stage.relative_to(REPO)}/")
+    try:
+        stage_display = stage.relative_to(REPO)
+    except ValueError:
+        stage_display = stage
+    print(f"built {out.name}: {n_files} files staged in {stage_display}/")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ Educational/analytical use only - not betting advice.
 import math
 import os
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(__file__)
 for _scripts in (os.path.join(ROOT, "skill", "scripts"), os.path.join(ROOT, "scripts")):
@@ -26,8 +27,25 @@ for _scripts in (os.path.join(ROOT, "skill", "scripts"), os.path.join(ROOT, "scr
 import match_model as mm  # noqa: E402
 
 from worldcup_2026_data_ko import ELO, HOME, KO_RESULTS  # noqa: E402,F401
+from model_governance import (  # noqa: E402
+    DrawFloorMetricRow,
+    FloorMetricRow,
+    evaluate_style_cohort,
+    load_home_advantage_ledger,
+    load_shootout_ledger,
+    load_style_observations,
+    paired_brier_comparison,
+    summarize_ensemble_basis,
+    summarize_draw_floor_interaction,
+    summarize_floor_active,
+    summarize_home_advantage,
+    summarize_shootouts,
+)
 
 KO = mm.STAGE_PROFILES["knockout"]
+FLOOR_REVIEW_BASELINE_N = 24
+REVIEW_GATE_N = 28
+SHADOW_DRAW_BOOST = 0.07
 
 
 def res(hg, ag):
@@ -52,7 +70,7 @@ def graded_k_for(eh, ea):
         KO.get("ko_elo_scale", 350.0))
 
 
-def predict(home, away, floor=None):
+def predict(home, away, floor=None, draw_boost=None):
     """Neutral-venue knockout prediction (no host bump, no motivation).
     Returns 90' probs, the score matrix, the Elo home win-expectation, and the
     advancement dict at the LOCKED graded ko_regress.
@@ -60,10 +78,12 @@ def predict(home, away, floor=None):
     eh, ea = ELO[home], ELO[away]
     if floor is None:
         floor = KO.get("lambda_floor", 0.15)
+    if draw_boost is None:
+        draw_boost = KO["draw_boost"]
     lh, la = mm.elo_to_lambdas(eh, ea, avg_goals=KO["avg_goals"],
                                gd_per_100=KO["gd_per_100"], floor=floor)
     style = "open" if abs(eh - ea) >= 266 else "balanced"
-    P = mm.score_matrix(lh, la, opp_style=style, draw_boost=KO["draw_boost"])
+    P = mm.score_matrix(lh, la, opp_style=style, draw_boost=draw_boost)
     ph, pd, pa, _ov, _btts = mm.summarise(P)
     e_home = 1 / (1 + 10 ** (-(eh - ea) / 400))
     adv = mm.advancement(P, e_home, graded_k_for(eh, ea), KO["pen_tilt"])
@@ -90,6 +110,102 @@ def adv_metrics(records, k):
         exp_ups += (1 - p_home) if e_home >= 0.5 else p_home  # P(Elo-underdog)
     m = len(records)
     return brier / m, ll / m, exp_ups
+
+
+def paired_graded_flat1(records):
+    """Paired advancement Brier comparison on the exact same fixtures."""
+    graded = []
+    flat1 = []
+    outcomes = []
+    for P, e_home, advanced, d_elo in records:
+        k_graded = mm.graded_ko_regress(
+            d_elo, KO["ko_regress"],
+            KO.get("ko_regress_max", KO["ko_regress"]),
+            KO.get("ko_elo_scale", 350.0))
+        graded.append(mm.advancement(P, e_home, k_graded, KO["pen_tilt"])["adv_reg"])
+        flat1.append(mm.advancement(P, e_home, 1.0, KO["pen_tilt"])["adv_reg"])
+        outcomes.append(1 if advanced == "H" else 0)
+    return paired_brier_comparison(
+        graded,
+        flat1,
+        outcomes,
+        minimum_for_review=REVIEW_GATE_N,
+    )
+
+
+def build_floor_metric_rows(games=KO_RESULTS):
+    """Build score/advancement metrics only once for the floor governance review."""
+    official_floor = KO.get("lambda_floor", 0.15)
+    shadow_floor = 0.15
+    rows = []
+    for sequence, (home, away, hg, ag, advanced, _stage) in enumerate(games, 1):
+        eh, ea = ELO[home], ELO[away]
+        goal_difference = (eh - ea) / 100.0 * KO["gd_per_100"]
+        raw_lh = KO["avg_goals"] / 2.0 + goal_difference / 2.0
+        raw_la = KO["avg_goals"] / 2.0 - goal_difference / 2.0
+        floor_active = min(raw_lh, raw_la) < official_floor - 1e-12
+
+        oph, opd, opa, official_P, _oe, official_adv = predict(
+            home, away, floor=official_floor)
+        sph, spd, spa, shadow_P, _se, shadow_adv = predict(
+            home, away, floor=shadow_floor)
+        result = res(hg, ag)
+        outcome = 1.0 if advanced == "H" else 0.0
+        rows.append(FloorMetricRow(
+            sequence=sequence,
+            fixture=f"{home}|{away}",
+            floor_active=floor_active,
+            official_rps=rps_hda((oph, opd, opa), result),
+            shadow_rps=rps_hda((sph, spd, spa), result),
+            official_score_log_loss=-math.log(max(official_P[(hg, ag)], 1e-12)),
+            shadow_score_log_loss=-math.log(max(shadow_P[(hg, ag)], 1e-12)),
+            official_adv_brier=(official_adv["adv_reg"] - outcome) ** 2,
+            shadow_adv_brier=(shadow_adv["adv_reg"] - outcome) ** 2,
+        ))
+    return rows
+
+
+def build_draw_floor_metric_rows(games=KO_RESULTS):
+    """Build the pre-registered 2x2 floor-by-draw-boost score table."""
+    official_floor = KO.get("lambda_floor", 0.15)
+    floor_levels = (0.15, official_floor)
+    draw_levels = (KO["draw_boost"], SHADOW_DRAW_BOOST)
+    if len(set(floor_levels)) != 2 or len(set(draw_levels)) != 2:
+        raise ValueError("draw-floor review requires two distinct factor levels")
+
+    rows = []
+    for sequence, (home, away, hg, ag, advanced, _stage) in enumerate(games, 1):
+        result = res(hg, ag)
+        outcome = 1.0 if advanced == "H" else 0.0
+        for floor in floor_levels:
+            for draw_boost in draw_levels:
+                ph, pd, pa, matrix, _e_home, adv = predict(
+                    home,
+                    away,
+                    floor=floor,
+                    draw_boost=draw_boost,
+                )
+                rows.append(DrawFloorMetricRow(
+                    sequence=sequence,
+                    floor=floor,
+                    draw_boost=draw_boost,
+                    rps=rps_hda((ph, pd, pa), result),
+                    score_log_loss=-math.log(max(matrix[(hg, ag)], 1e-12)),
+                    adv_brier=(adv["adv_reg"] - outcome) ** 2,
+                ))
+    return rows
+
+
+def structured_governance_summaries(root=Path(ROOT)):
+    """Load the small append-only ledgers used by the review output and tests."""
+    style = evaluate_style_cohort(
+        load_style_observations(root / "style_divergence_ledger.csv"))
+    shootout = summarize_shootouts(
+        load_shootout_ledger(root / "shootout_ledger.csv"))
+    home = summarize_home_advantage(
+        load_home_advantage_ledger(root / "home_advantage_ledger.csv"))
+    ensemble = summarize_ensemble_basis(root / "ensemble_ledger.csv")
+    return style, shootout, home, ensemble
 
 
 def main():
@@ -143,26 +259,61 @@ def main():
           f"(avg {ll90/n:.3f}) | dir {dir_hit}/{n} | draws {draws_act}/{n} "
           f"| blowout>=3 {blow_act} (model exp {blow_exp:.1f})")
 
-    # SHADOW floor-0.15 track (2 rounds after the 2026-07-08 v3.9 adoption of
-    # lambda_floor 0.30): same metrics at the old floor, summary line only.
-    if KO.get("lambda_floor", 0.15) != 0.15:
-        s_rps = s_ll90 = 0.0
-        s_records = []
-        for home, away, hg, ag, advanced, _stage in games:
-            ph, pd, pa, P, e_home, adv = predict(home, away, floor=0.15)
-            s_rps += rps_hda((ph, pd, pa), res(hg, ag))
-            s_ll90 += math.log(max(P[(hg, ag)], 1e-12))
-            s_records.append((P, e_home, advanced, ELO[home] - ELO[away]))
-        sb, sl, _se = adv_metrics(s_records, None)
-        print(f"SHADOW floor-0.15: RPS {s_rps/n:.4f} | logL avg {s_ll90/n:.3f} "
-              f"| adv Brier {sb:.4f} | adv logLoss {sl:.4f}")
-
     bg, lg, eg = adv_metrics(records, None)   # LOCKED graded default
     print(f"\nADVANCEMENT (LOCKED graded k {KO['ko_regress']}->"
           f"{KO.get('ko_regress_max', KO['ko_regress'])}"
           f"/{KO.get('ko_elo_scale', 350.0):.0f}):  called-right {adv_hit}/{n}"
           f"  |  Brier {bg:.4f}  |  log-loss {lg:.4f}")
     print(f"  upsets: actual {act_ups}  vs  model-expected {eg:.2f}")
+
+    paired = paired_graded_flat1(records)
+    print("  paired graded-flat1 Brier: "
+          f"delta {paired.mean_difference:+.4f} | SE {paired.standard_error:.4f} "
+          f"| 95% CI [{paired.ci95_low:+.4f}, {paired.ci95_high:+.4f}] "
+          f"| gate {paired.n}/{paired.minimum_for_review} => {paired.decision}")
+
+    floor_review = summarize_floor_active(
+        build_floor_metric_rows(games),
+        review_baseline_n=FLOOR_REVIEW_BASELINE_N,
+        minimum_for_review=REVIEW_GATE_N,
+    )
+    print(f"\nFLOOR-ACTIVE REVIEW (official {KO.get('lambda_floor', 0.15):.2f} "
+          f"vs shadow 0.15; baseline n={FLOOR_REVIEW_BASELINE_N}):")
+    print(f"  prospective rows {floor_review.prospective_rows} | "
+          f"prospective active {floor_review.active_rows} | "
+          f"historical active excluded {floor_review.historical_active_rows} | "
+          f"identifying {floor_review.identifying_rows} | "
+          f"gate {floor_review.total_rows}/{floor_review.minimum_for_review}")
+    if floor_review.active_rows:
+        print(f"  active-only RPS official/shadow "
+              f"{floor_review.official_rps:.4f}/{floor_review.shadow_rps:.4f} | "
+              f"score logLoss {floor_review.official_score_log_loss:.3f}/"
+              f"{floor_review.shadow_score_log_loss:.3f} | adv Brier "
+              f"{floor_review.official_adv_brier:.4f}/"
+              f"{floor_review.shadow_adv_brier:.4f}")
+    if not floor_review.gate_reached:
+        floor_reason = "n=28 review gate not reached"
+    elif not floor_review.identifying_rows:
+        floor_reason = "no post-adoption floor-active fixture added identifying power"
+    else:
+        floor_reason = "post-adoption floor-active evidence is ready for review"
+    print(f"  => {floor_review.decision}: {floor_reason}.")
+
+    draw_floor = summarize_draw_floor_interaction(
+        build_draw_floor_metric_rows(games),
+        minimum_for_review=REVIEW_GATE_N,
+    )
+    print(f"\nDRAW_BOOST x FLOOR 2x2 (gate "
+          f"{draw_floor.fixture_rows}/{draw_floor.minimum_for_review}):")
+    print(f"  {'floor':>6}{'draw':>7}{'RPS':>9}{'scoreLL':>10}{'advBrier':>11}")
+    for cell in draw_floor.cells:
+        print(f"  {cell.floor:>6.2f}{cell.draw_boost:>7.2f}"
+              f"{cell.rps:>9.4f}{cell.score_log_loss:>10.4f}"
+              f"{cell.adv_brier:>11.4f}")
+    print(f"  factorial interaction: RPS {draw_floor.rps_interaction:+.5f} | "
+          f"scoreLL {draw_floor.score_log_loss_interaction:+.5f} | "
+          f"advBrier {draw_floor.adv_brier_interaction:+.5f} "
+          f"=> {draw_floor.decision}")
 
     ks = [0.60, 0.70, 0.85, 1.00]
     print(f"\nk-sensitivity (advancement; n={n} — MONITORING ONLY, the graded "
@@ -181,15 +332,33 @@ def main():
     print(f"  reality was {tone} upset-heavy than the regressed model "
           f"(actual {act_ups} vs {e70:.2f} expected at k=0.70).")
     print(f"  best-Brier k among {ks} = {best_k}  (n={n}, high variance).")
-    if best_k <= 0.70 or act_ups >= e70:
-        print("  => k=0.70 is NOT over-regressing — the original 'favourites are "
-              "under-rated' hypothesis is contradicted; if anything the data "
-              f"leans to MORE regression. HOLD the locked graded rule "
-              f"(do not refit on n={n}); revisit after the next full round.")
+    print("  => MONITORING ONLY: graded-k, lambda floor, draw boost, and w=0.6 "
+          "remain frozen through the tournament; review output cannot refit "
+          "production parameters.")
+
+    style, shootout, home, ensemble = structured_governance_summaries()
+    print("\nSTRUCTURED GOVERNANCE LEDGERS:")
+    print(f"  style cohort: observations {style.observation_rows}, distinct fixtures "
+          f"{style.distinct_fixtures}, eligible {style.eligible_fixtures}, "
+          f"pending triggers {style.pending_trigger_fixtures} => {style.decision}")
+    print(f"  real shootouts: Elo tilt {shootout.elo_tilt_hits}/"
+          f"{shootout.real_shootout_rows} "
+          f"(review at n>={shootout.minimum_for_review}) => {shootout.decision}")
+    print(f"  home/altitude: home-only {home.home_only_rows}, "
+          f"separated {home.separated_rows}, "
+          f"legacy-combined {home.legacy_combined_rows}, altitude-identified "
+          f"{home.altitude_identified_rows} => home {home.home_decision} / "
+          f"altitude {home.altitude_decision} | {home.archive_status}")
+    print(f"  ensemble basis: live_current_elo {ensemble.live_rows}/"
+          f"{ensemble.total_rows} (refit at n>={ensemble.minimum_for_refit}) "
+          f"=> {ensemble.decision} | {ensemble.basis_counts}")
+    if ensemble.best_weight is None:
+        print(f"    current w={ensemble.current_weight:.1f} Brier "
+              f"{ensemble.current_brier:.4f}; grid not run before eligible n=12")
     else:
-        print("  => data leans to LESS regression; consider a small, provisional "
-              f"nudge up, but HOLD until the next full round accumulates "
-              f"(n={n} is still too small to refit).")
+        print(f"    current w={ensemble.current_weight:.1f} Brier "
+              f"{ensemble.current_brier:.4f} vs best w={ensemble.best_weight:.1f} "
+              f"Brier {ensemble.best_brier:.4f}")
     print("\nEducational/analytical use only; not betting advice.")
 
 

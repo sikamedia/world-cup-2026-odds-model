@@ -19,9 +19,9 @@ Only three core defaults changed from older bundles:
 | `avg_goals` | 2.85 | **2.90** | Better O/U 2.5 calibration. |
 
 The 72-game group-stage regression locks the v3.7A profile. Knockout games are
-kept in a separate batch: as of 2026-07-08, `backtest_ko.py` validates KO n=24,
-advancement 18/24, and 90-minute RPS 0.1502 under the v3.9 lambda floor. The
-graded-k knockout profile remains locked; flat-k is still monitor-only.
+kept in a separate batch: through 2026-07-12, `backtest_ko.py` validates KO
+n=28, advancement 22/28, and 90-minute RPS 0.1472 under the v3.9 lambda floor.
+The graded-k knockout profile remains locked; flat-k is still monitor-only.
 
 ## Install
 
@@ -40,28 +40,31 @@ If you manually copy files, include:
 - `competition_state.py`, `match_context.py`, `team_aliases.py`,
   `worldcup_2026_data.py`, `worldcup_2026_data_jun26.py`,
   `worldcup_2026_data_ko.py`, `model_stability.py`, and `market_blend.py`
-- tests: `test_regression.py`, `test_odds_api_pipeline.py`,
-  `test_competition_state_context.py`, `test_jun26_results_scaffold.py`
+- `pyproject.toml`, `tests/test_active_scripts.py`, and all active regression
+  scripts required by the two suite entry points
 
 ## Validate
 
 Run these checks from the installed skill directory:
 
 ```bash
-python3 test_regression.py
+./run_tests.sh
+python3 -m pytest -q
 python3 backtest_ko.py
-python3 test_odds_api_pipeline.py
-python3 test_competition_state_context.py
-python3 test_jun26_results_scaffold.py
 ```
 
 Expected pass markers:
 
-- `ALL v3.6 REGRESSION CHECKS PASSED`
-- `KNOCKOUT BACKTEST — 24 game(s)`
-- `ODDS_API_PIPELINE_REGRESSION PASS`
-- `COMPETITION_STATE_CONTEXT_REGRESSION PASS`
-- `JUN26_RESULTS_SCAFFOLD PASS`
+- `All tests passed.`
+- `10 passed` in the packaged bundle (`12 passed` in the repository, whose
+  paper-ledger and release-tooling tests are intentionally not shipped)
+- `KNOCKOUT BACKTEST — 28 game(s)`
+
+For current knockout finalization, run `create_context_template.py` with
+`--source sf_jul14_15 --fixture <slug>`. A confirmed closed-roof decision requires
+`roof_status=closed`, the exact `weather_evidence_fixture_id`, and retained
+official evidence checked within six hours. Follow `AUTOMATION_RUNBOOK.md` for
+the one-time scheduler contract and fail-closed commands.
 
 ## Quick Start
 

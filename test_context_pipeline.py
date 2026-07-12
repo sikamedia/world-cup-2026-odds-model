@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -15,12 +16,14 @@ def main() -> None:
     input_csv = tmp / "context_pipeline_input.csv"
     base_json = tmp / "context_pipeline_base.json"
     output_json = tmp / "context_pipeline_output.json"
+    weather_snapshot = "synthetic hourly forecast valid at kickoff"
+    weather_sha256 = hashlib.sha256(weather_snapshot.encode("utf-8")).hexdigest()
 
     input_csv.write_text(
         "\n".join(
             [
-                "home,away,market_home,market_draw,market_away,market_confidence",
-                "United States,Turkey,1.65,3.60,5.50,0.8",
+                "home,away,market_home,market_draw,market_away,market_advance_odds,market_confidence",
+                "United States,Turkey,1.65,3.60,5.50,1.75/2.15,0.8",
             ]
         )
         + "\n",
@@ -36,10 +39,20 @@ def main() -> None:
                 "matches": {
                     "USA|Turkiye": {
                         "market_odds": [1.70, 3.55, 5.10],
+                        "market_advance_odds": [1.80, 2.10],
                         "market_method": "power",
                         "lineup_home": 0.92,
                         "lineup_away": 1.08,
                         "weather_scale": 0.95,
+                        "kickoff_at_utc": "2026-06-26T20:00:00Z",
+                        "weather_checked_at_utc": "2026-06-26T17:00:00Z",
+                        "weather_forecast_issued_at_utc": "2026-06-26T16:00:00Z",
+                        "weather_forecast_valid_at_utc": "2026-06-26T20:00:00Z",
+                        "weather_source": "https://weather.example/hourly",
+                        "weather_evidence_type": "hourly",
+                        "weather_decision": "heat_mild",
+                        "weather_evidence_snapshot": weather_snapshot,
+                        "weather_evidence_sha256": weather_sha256,
                         "market_confidence": 0.7,
                         "source_key": "manual base key",
                         "notes": "base notes",
@@ -79,6 +92,7 @@ def main() -> None:
     data = json.loads(output_json.read_text(encoding="utf-8"))
     merged = data["matches"]["USA|Turkiye"]
     assert merged["market_odds"] == [1.65, 3.60, 5.50]
+    assert merged["market_advance_odds"] == [1.75, 2.15]
     assert merged["market_method"] == "power"
     assert merged["lineup_home"] == 0.92
     assert merged["lineup_away"] == 1.08

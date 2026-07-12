@@ -24,16 +24,11 @@ from bet_ledger import (
     write_ledger,
 )
 from competition_state import match_adjustments
+from elo_snapshot import EloSnapshot, EloSnapshotError, load_elo_snapshot
 from external_ratings import audit_fixture_ratings, load_external_ratings_csv
-from match_context import context_key, de_margin_odds, load_context_file
+from match_context import context_key, de_margin_odds, load_context_file, validate_weather_context
 from model_stability import GROUP_V37A, KNOCKOUT_LOCKED, PROFILE_REGISTRY, predict_match, resolve_profile
 from team_aliases import resolve_team_name
-
-try:
-    from elo_current_jul8 import ELO_CURRENT, FETCHED_BASE as ELO_CURRENT_FETCHED
-except Exception:  # pragma: no cover - optional prediction-side snapshot
-    ELO_CURRENT = None
-    ELO_CURRENT_FETCHED = "unavailable"
 
 
 SELECTIONS = ("H", "X", "A")
@@ -118,15 +113,26 @@ def _elo_for_fixture(
     home: str,
     away: str,
     elo_source: str,
+    elo_snapshot: EloSnapshot | None,
 ) -> tuple[dict[str, float] | None, str]:
     if elo_source == "snapshot":
         return None, "snapshot"
-    if ELO_CURRENT is None:
-        return None, "current Elo snapshot unavailable"
-    missing = [team for team in (home, away) if team not in ELO_CURRENT]
+    if elo_snapshot is None:  # guarded once for the whole slate in main()
+        raise EloSnapshotError("current Elo snapshot was not validated")
+    missing = [team for team in (home, away) if team not in elo_snapshot.ratings]
     if missing:
-        return None, f"missing current Elo for {', '.join(missing)}"
-    return ELO_CURRENT, f"current Elo fetched {ELO_CURRENT_FETCHED}"
+        raise EloSnapshotError(f"missing current Elo for {', '.join(missing)}")
+    return elo_snapshot.ratings, elo_snapshot.provenance_note
+
+
+def _required_fixture_teams(fixtures: list[dict[str, str]]) -> list[str]:
+    teams: list[str] = []
+    for fixture in fixtures:
+        for keys in (("home", "team1", "side1"), ("away", "team2", "side2")):
+            raw = _first_non_empty(fixture, keys)
+            if raw:
+                teams.append(resolve_team_name(raw))
+    return list(dict.fromkeys(teams))
 
 
 def _competition_block_reason(stage: str, ctx, require_group_state: bool) -> str:
@@ -179,6 +185,7 @@ def _best_signal(
     policy: RiskPolicy,
     block_reasons: list[str],
     elo_source: str,
+    elo_snapshot: EloSnapshot | None,
     external_ratings: dict | None,
     external_rank_gap_threshold: int,
     external_rating_gap_threshold: float,
@@ -188,26 +195,12 @@ def _best_signal(
 
     home = resolve_team_name(_first_non_empty(fixture, ("home", "team1", "side1")))
     away = resolve_team_name(_first_non_empty(fixture, ("away", "team2", "side2")))
-    elo_override, elo_note = _elo_for_fixture(home=home, away=away, elo_source=elo_source)
-    if elo_source == "current" and elo_override is None:
-        block_reasons = [*block_reasons, elo_note]
-        return build_ledger_row(
-            date=date,
-            stage=stage,
-            market_type=market_type,
-            home=home,
-            away=away,
-            selection="H",
-            bookmaker=bookmaker,
-            odds_decimal=ctx.market_odds[0],
-            p_model=0.0,
-            p_market=0.0,
-            edge_raw=0.0,
-            edge_net=0.0,
-            stake_units=0.0,
-            status="no_bet",
-            notes="; ".join(block_reasons),
-        )
+    elo_override, elo_note = _elo_for_fixture(
+        home=home,
+        away=away,
+        elo_source=elo_source,
+        elo_snapshot=elo_snapshot,
+    )
     host_home = _parse_int(_first_non_empty(fixture, ("host_home", "home_field"), "0"))
     heat = _first_non_empty(fixture, ("heat",), "none")
 
@@ -337,7 +330,22 @@ def main() -> None:
         "--elo-source",
         choices=["current", "snapshot"],
         default="current",
-        help="Prediction-side Elo source. Default current uses elo_current_jul8.py; snapshot uses backtest Elo.",
+        help="Prediction-side Elo source. Default current validates --elo-module; snapshot uses backtest Elo.",
+    )
+    ap.add_argument(
+        "--elo-module",
+        default="elo_current_latest.py",
+        help="Current Elo snapshot module path/name (default: elo_current_latest.py).",
+    )
+    ap.add_argument(
+        "--elo-source-tsv",
+        help="Retained raw World.tsv used to verify SOURCE_SHA256 (required for current Elo).",
+    )
+    ap.add_argument(
+        "--max-elo-age-hours",
+        type=float,
+        default=24.0,
+        help="Maximum age of a current Elo snapshot (default: 24).",
     )
     ap.add_argument(
         "--external-ratings-csv",
@@ -387,6 +395,50 @@ def main() -> None:
     meta, context_matches = _context_payload(context_path)
     contexts = load_context_file(context_path)
     fixtures = _load_fixture_rows(args.fixture_csv, context_matches)
+    elo_snapshot = None
+    if args.elo_source == "current":
+        if not args.elo_source_tsv:
+            ap.error("--elo-source-tsv is required when --elo-source=current")
+        source_tsv = Path(args.elo_source_tsv)
+        if not source_tsv.is_file():
+            ap.error(f"retained World.tsv does not exist: {source_tsv}")
+        required_teams = _required_fixture_teams(fixtures)
+        if not required_teams:
+            ap.error("current Elo validation found no fixture teams")
+        try:
+            elo_snapshot = load_elo_snapshot(
+                args.elo_module,
+                required_teams=required_teams,
+                max_age_hours=args.max_elo_age_hours,
+                source_tsv=source_tsv,
+            )
+        except EloSnapshotError as exc:
+            ap.error(f"current Elo validation failed: {exc}")
+        weather_errors = []
+        for fixture in fixtures:
+            home_raw = _first_non_empty(fixture, ("home", "team1", "side1"))
+            away_raw = _first_non_empty(fixture, ("away", "team2", "side2"))
+            if not home_raw or not away_raw:
+                continue
+            key = context_key(home_raw, away_raw)
+            ctx = contexts.get(key)
+            if ctx is None:
+                weather_errors.append(f"{key}: missing match context")
+                continue
+            weather_errors.extend(
+                f"{key}: {issue}"
+                for issue in validate_weather_context(
+                    ctx,
+                    require_evidence=True,
+                    legacy_heat=_first_non_empty(fixture, ("heat",), "none"),
+                    now_utc=datetime.now(timezone.utc),
+                )
+            )
+        if weather_errors:
+            ap.error(
+                "current prediction weather validation failed:\n  "
+                + "\n  ".join(weather_errors)
+            )
     external_ratings = (
         load_external_ratings_csv(args.external_ratings_csv)
         if args.external_ratings_csv
@@ -422,6 +474,7 @@ def main() -> None:
             policy=policy,
             block_reasons=block_reasons,
             elo_source=args.elo_source,
+            elo_snapshot=elo_snapshot,
             external_ratings=external_ratings,
             external_rank_gap_threshold=args.external_rank_gap_threshold,
             external_rating_gap_threshold=args.external_rating_gap_threshold,

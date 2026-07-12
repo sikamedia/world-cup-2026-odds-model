@@ -11,7 +11,7 @@ weather, and competition-state inputs, and knockout-stage advancement
 Educational and analytical use only. This repository does not provide betting
 advice, staking advice, or guaranteed predictions.
 
-## What v0.2 Includes
+## What v0.4 Includes
 
 - Core match model (v3.7A) with stage profiles: a regression-locked group-stage
   profile and a separate `--stage knockout` profile.
@@ -29,6 +29,7 @@ advice, staking advice, or guaranteed predictions.
   top-spot, and rotation-risk scenarios.
 - Installable Codex skill artifact: `football-odds-model.skill`.
 - Skill source assets: `skill/` (run `python3 build_skill.py` to package).
+- Release preparation tooling plus a main-only GitHub prerelease workflow.
 
 ## Repository Layout
 
@@ -55,7 +56,9 @@ advice, staking advice, or guaranteed predictions.
 |-- evaluate_bet_ledger.py         (paper ledger performance report)
 |-- bet_ledger.py                  (shared ledger schema + risk gates)
 |-- build_skill.py                  (builds football-odds-model.skill)
+|-- release_tool.py                 (version prep + release consistency checks)
 |-- football-odds-model.skill
+|-- .github/workflows/              (PR CI + main-only release workflow)
 |-- archive/                        (frozen historical models + backtests)
 `-- test_*.py
 ```
@@ -125,6 +128,31 @@ export ODDS_API_SPORT_KEY="..."
 
 Do not commit API keys, `.env` files, or private recorded payloads.
 
+Weather adjustments are auditable context, not model parameters. Current
+predictions must record kickoff/check/forecast issue and valid times, an
+HTTP(S) source, evidence type, evidence snapshot plus SHA-256, decision, and
+scale. Heat evidence must be checked within 6 hours and cover the kickoff hour;
+the forecast issue may be no more than 24 hours old when checked;
+`rain_applied` requires hourly/radar evidence within 3 hours. Missing or stale
+evidence is a blocking error, not a warning.
+
+`indoor_no_weather` is valid only with official, match-specific roof evidence
+checked within six hours, `roof_status=closed`, and the selected fixture's exact
+`weather_evidence_fixture_id`. A retractable roof by itself is not indoor
+evidence.
+
+Use `create_context_template.py --source sf_jul14_15 --fixture <slug>` to create
+one semifinal finalization template, then import the completed CSV with
+`--require-weather-evidence --context-only`. `predict_jul11.py finalize` writes
+a stage-labelled schema-2, hashed, create-only artifact for exactly that
+fixture; direct two-way advancement odds take precedence over the documented
+90-minute fallback. The historical `predict_jul11.py mc` path remains QF-only.
+See
+[AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md) for the external scheduler
+contract and finalization times.
+See [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md) for the tournament freeze,
+style-cohort, shootout, and home-advantage decision rules.
+
 ## Paper Trading Workflow
 
 The trading layer is **paper-only**. It records candidate model-vs-market
@@ -135,17 +163,19 @@ Generate conservative signals from a context JSON:
 ```bash
 python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
+  --elo-module elo_current_latest.py \
+  --elo-source-tsv evidence/World.tsv \
   --output-csv /tmp/paper_signals.csv \
   --append-ledger paper_bet_ledger.csv \
   --date 2026-07-05 \
   --stage R16
 ```
 
-By default, `generate_paper_signals.py` uses prediction-side current Elo from
-`elo_current_jul8.py` (verified 7/7 base plus labelled K=60 estimates for
-post-7/7 matches). Group-stage labels select `group_v37a`; knockout labels such
-as `R32`, `R16`, `QF`, `SF`, and `final` select `knockout_locked`. Use
-`--elo-source snapshot` only for historical replay, not live paper trading.
+By default, `generate_paper_signals.py` reads `elo_current_latest.py` and
+validates the exact World.tsv source, SHA-256, 24-hour freshness, required-team
+coverage, and `ESTIMATES=[]`. Any failure exits before a CSV is written.
+Group-stage labels select `group_v37a`; knockout labels select
+`knockout_locked`. Use `--elo-source snapshot` only for historical replay.
 
 Default gates:
 
@@ -160,6 +190,8 @@ audit file:
 ```bash
 python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
+  --elo-module elo_current_latest.py \
+  --elo-source-tsv evidence/World.tsv \
   --output-csv /tmp/paper_signals.csv \
   --date 2026-07-05 \
   --stage R16 \
@@ -219,17 +251,15 @@ Run the whole active suite at once:
 ./run_tests.sh
 ```
 
-Or run the individual checks:
+With the `test` optional dependencies installed, the equivalent pytest entry
+point is:
 
 ```bash
-python3 test_jun26_results_scaffold.py
-python3 test_competition_state_context.py
-python3 test_context_aliases.py
-python3 test_odds_api_pipeline.py
-python3 test_context_pipeline.py
-python3 test_bet_ledger_pipeline.py
-python3 skill/test_regression.py
+python3 -m pytest -q
 ```
+
+Both commands execute every root `test_*.py` script plus
+`skill/test_regression.py`. Individual scripts can still be run directly.
 
 ## Skill Installation
 
@@ -238,9 +268,9 @@ update flow. Rebuild the bundle with `python3 build_skill.py`.
 
 ## Status
 
-Version: `0.2`
+Version: `0.4.0-rc.1`
 
-Branch target: `release/0.2`
+Development branch: `dev`; release tags are cut from `main` after merge.
 
 The group stage is complete (72/72), and the knockout stage is live: the engine
 now emits advancement probabilities and full-bracket odds.
@@ -252,6 +282,20 @@ Current release policy:
 - Keep market context and competition state decoupled from core scoring.
 - Do not add unverified final scores.
 - Prefer confirmed match-day information over narrative assumptions.
+
+## Release Workflow
+
+Prepare version metadata and the committed skill bundle on `dev`:
+
+```bash
+python3 release_tool.py prepare v0.4.0-rc.1
+```
+
+Commit the generated changes and merge `dev` into `main` through a PR. From
+`main`, run the GitHub Actions `Release` workflow with the same tag. The
+workflow validates metadata, tests, and the bundle before creating an annotated
+tag, a GitHub prerelease for RC tags, and `.skill` plus SHA-256 assets. It never
+creates a version commit on `main`.
 
 ## Disclaimer
 

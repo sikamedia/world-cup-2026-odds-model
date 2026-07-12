@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Test and verify release bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependency
+        run: python -m pip install "pytest>=7.4,<9"
+
+      - name: Run standalone tests
+        run: ./run_tests.sh
+
+      - name: Run pytest suite
+        run: python -m pytest -q
+
+      - name: Run knockout backtest
+        run: python backtest_ko.py
+
+      - name: Verify release metadata and bundle
+        run: python release_tool.py check
+
+      - name: Confirm tracked files are unchanged
+        run: git diff --exit-code -- .

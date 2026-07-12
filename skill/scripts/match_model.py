@@ -237,7 +237,7 @@ def main():
                          "0.20; 0 = pure coin-flip)")
     # --- adjustment flags (applied AFTER lambdas are set) ---
     ap.add_argument("--heat", choices=["mild", "moderate", "severe"],
-                    help="hot/humid game: scale total goals 0.95/0.90/0.85")
+                    help="hot/humid game: scale total goals 0.95/0.92/0.90")
     ap.add_argument("--rain", action="store_true",
                     help="rain: slick/low-scoring, scale total goals ~0.95")
     ap.add_argument("--inj-home", type=float, default=1.0, dest="inj_home",
@@ -320,7 +320,7 @@ def main():
     # apply adjustments (see SKILL.md Discipline A: put these on the
     # Elo-derived lambda, then compare to market — do not double-count)
     notes = []
-    heat_scale = {"mild": 0.95, "moderate": 0.90, "severe": 0.85}
+    heat_scale = {"mild": 0.95, "moderate": 0.92, "severe": 0.90}
     if args.heat:
         s = heat_scale[args.heat]
         lh *= s; la *= s
