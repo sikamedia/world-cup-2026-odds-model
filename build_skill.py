@@ -15,6 +15,7 @@ Run: ``python3 build_skill.py``
 from __future__ import annotations
 
 import shutil
+import stat
 import zipfile
 from pathlib import Path
 
@@ -24,6 +25,7 @@ DIST = REPO / "dist"
 STAGE = DIST / SKILL_NAME
 SKILL_FILE = REPO / f"{SKILL_NAME}.skill"
 SKILL_DIR = REPO / "skill"
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 # Active root files shipped inside the skill (model + pipeline + tests).
 # Excludes archived history (match_model_v33/v34, now under archive/) and the
@@ -93,6 +95,15 @@ def _is_cache(path: Path) -> bool:
     return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
 
 
+def _zip_info(path: Path, archive_name: Path) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(archive_name.as_posix(), date_time=ZIP_TIMESTAMP)
+    info.compress_type = zipfile.ZIP_STORED
+    info.create_system = 3
+    permissions = 0o755 if path.stat().st_mode & stat.S_IXUSR else 0o644
+    info.external_attr = (stat.S_IFREG | permissions) << 16
+    return info
+
+
 def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
     if stage.exists():
         try:
@@ -140,13 +151,17 @@ def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
             out = alt
     with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
         for path in sorted(stage.rglob("*")):
-            if _is_cache(path):
+            if _is_cache(path) or not path.is_file():
                 continue
-            zf.write(path, Path(SKILL_NAME) / path.relative_to(stage))
+            archive_name = Path(SKILL_NAME) / path.relative_to(stage)
+            zf.writestr(_zip_info(path, archive_name), path.read_bytes())
 
     n_files = sum(1 for p in stage.rglob("*") if p.is_file())
-    print(f"built {out.name}: {n_files} files staged in "
-          f"{stage.relative_to(REPO)}/")
+    try:
+        stage_display = stage.relative_to(REPO)
+    except ValueError:
+        stage_display = stage
+    print(f"built {out.name}: {n_files} files staged in {stage_display}/")
 
 
 if __name__ == "__main__":

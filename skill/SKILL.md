@@ -485,9 +485,10 @@ Weather provenance is mandatory for current predictions, including no-adjustment
 outdoor decisions. Historical replay may load legacy rows, but any asserted
 weather override must still pass `validate_weather_context`.
 Before an official finalization, both `./run_tests.sh` and
-`python3 -m pytest -q` must pass. The repository suite currently covers 11/11
+`python3 -m pytest -q` must pass. The repository suite currently covers 12/12
 standalone scripts through the pytest adapter; the packaged skill covers 10/10
-because paper-ledger code and its test are intentionally repository-only.
+because paper-ledger and release-tooling code/tests are intentionally
+repository-only.
 
 ## Data sources
 

@@ -29,6 +29,7 @@ advice, staking advice, or guaranteed predictions.
   top-spot, and rotation-risk scenarios.
 - Installable Codex skill artifact: `football-odds-model.skill`.
 - Skill source assets: `skill/` (run `python3 build_skill.py` to package).
+- Release preparation tooling plus a main-only GitHub prerelease workflow.
 
 ## Repository Layout
 
@@ -55,7 +56,9 @@ advice, staking advice, or guaranteed predictions.
 |-- evaluate_bet_ledger.py         (paper ledger performance report)
 |-- bet_ledger.py                  (shared ledger schema + risk gates)
 |-- build_skill.py                  (builds football-odds-model.skill)
+|-- release_tool.py                 (version prep + release consistency checks)
 |-- football-odds-model.skill
+|-- .github/workflows/              (PR CI + main-only release workflow)
 |-- archive/                        (frozen historical models + backtests)
 `-- test_*.py
 ```
@@ -279,6 +282,20 @@ Current release policy:
 - Keep market context and competition state decoupled from core scoring.
 - Do not add unverified final scores.
 - Prefer confirmed match-day information over narrative assumptions.
+
+## Release Workflow
+
+Prepare version metadata and the committed skill bundle on `dev`:
+
+```bash
+python3 release_tool.py prepare v0.4.0-rc.1
+```
+
+Commit the generated changes and merge `dev` into `main` through a PR. From
+`main`, run the GitHub Actions `Release` workflow with the same tag. The
+workflow validates metadata, tests, and the bundle before creating an annotated
+tag, a GitHub prerelease for RC tags, and `.skill` plus SHA-256 assets. It never
+creates a version commit on `main`.
 
 ## Disclaimer
 

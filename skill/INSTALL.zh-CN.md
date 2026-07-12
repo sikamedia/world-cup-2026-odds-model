@@ -52,7 +52,8 @@ python3 backtest_ko.py
 预期通过标记：
 
 - `All tests passed.`
-- skill 包内为 `10 passed`（仓库内为 `11 passed`；paper-ledger 测试按设计不打包）
+- skill 包内为 `10 passed`（仓库内为 `12 passed`；paper-ledger 和 release-tooling
+  测试按设计不打包）
 - `KNOCKOUT BACKTEST — 28 game(s)`
 
 当前淘汰赛 finalization 运行 `create_context_template.py` 并传入

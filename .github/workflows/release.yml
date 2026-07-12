@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example, v0.4.0-rc.1 or v0.4.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate, tag, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Require the main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Release runs must be dispatched from main; got $GITHUB_REF" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify checkout is current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+            echo "The workflow checkout is not the current origin/main HEAD." >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependency
+        run: python -m pip install "pytest>=7.4,<9"
+
+      - name: Run standalone tests
+        run: ./run_tests.sh
+
+      - name: Run pytest suite
+        run: python -m pytest -q
+
+      - name: Run knockout backtest
+        run: python backtest_ko.py
+
+      - name: Verify requested version and release bundle
+        run: python release_tool.py check "$RELEASE_TAG"
+
+      - name: Confirm tracked files are unchanged
+        run: git diff --exit-code -- .
+
+      - name: Create or verify annotated tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          validate_tag() {
+            local object_type target
+            object_type="$(git cat-file -t "refs/tags/$RELEASE_TAG")"
+            if [[ "$object_type" != "tag" ]]; then
+              echo "Existing $RELEASE_TAG is not an annotated tag." >&2
+              exit 1
+            fi
+
+            target="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if [[ "$target" != "$GITHUB_SHA" ]]; then
+              echo "Existing $RELEASE_TAG targets $target, not release commit $GITHUB_SHA." >&2
+              exit 1
+            fi
+          }
+
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            validate_tag
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
+
+            if ! git push origin "refs/tags/$RELEASE_TAG"; then
+              # A concurrent run may have created the tag after the initial check.
+              git tag -d "$RELEASE_TAG"
+              git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+              validate_tag
+            fi
+          fi
+
+          echo "commit=$(git rev-list -n 1 "$RELEASE_TAG")" >> "$GITHUB_OUTPUT"
+
+      - name: Create checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum football-odds-model.skill \
+            > "$RUNNER_TEMP/football-odds-model.skill.sha256"
+
+      - name: Create or update GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$RELEASE_TAG" == *-rc.* ]]; then
+            prerelease=true
+          else
+            prerelease=false
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [[ "$prerelease" == true ]]; then
+              gh release edit "$RELEASE_TAG" \
+                --title "$RELEASE_TAG" \
+                --draft=false \
+                --prerelease
+            else
+              gh release edit "$RELEASE_TAG" \
+                --title "$RELEASE_TAG" \
+                --draft=false \
+                --prerelease=false \
+                --latest
+            fi
+          elif [[ "$prerelease" == true ]]; then
+            gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --generate-notes \
+              --prerelease \
+              --verify-tag
+          else
+            gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --generate-notes \
+              --latest \
+              --verify-tag
+          fi
+
+          gh release upload "$RELEASE_TAG" \
+            football-odds-model.skill \
+            "$RUNNER_TEMP/football-odds-model.skill.sha256" \
+            --clobber

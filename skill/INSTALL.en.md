@@ -56,8 +56,8 @@ python3 backtest_ko.py
 Expected pass markers:
 
 - `All tests passed.`
-- `10 passed` in the packaged bundle (`11 passed` in the repository, whose
-  paper-ledger test is intentionally not shipped)
+- `10 passed` in the packaged bundle (`12 passed` in the repository, whose
+  paper-ledger and release-tooling tests are intentionally not shipped)
 - `KNOCKOUT BACKTEST — 28 game(s)`
 
 For current knockout finalization, run `create_context_template.py` with

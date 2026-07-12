@@ -84,8 +84,9 @@ shadow parameter adjustment.
 - The style ledger contains three observations across two fixtures, but zero
   formally eligible fixtures. Any reported "low-block side 4/4" sequence is a
   descriptive watch item, not evidence from the pre-registered style cohort.
-- Both active test entry points currently pass 11/11 scripts: `./run_tests.sh`
-  and `python3 -m pytest -q`.
+- In the repository, both active test entry points pass 12/12 scripts:
+  `./run_tests.sh` and `python3 -m pytest -q`. The packaged skill passes 10/10;
+  paper-ledger and release-tooling tests remain repository-only.
 
 ## Historical corrections
 
