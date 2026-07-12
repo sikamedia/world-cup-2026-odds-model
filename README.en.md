@@ -11,7 +11,7 @@ weather, and competition-state inputs, and knockout-stage advancement
 Educational and analytical use only. This repository does not provide betting
 advice, staking advice, or guaranteed predictions.
 
-## What v0.3 Includes
+## What v0.4 Includes
 
 - Core match model (v3.7A) with stage profiles: a regression-locked group-stage
   profile and a separate `--stage knockout` profile.
@@ -268,7 +268,7 @@ update flow. Rebuild the bundle with `python3 build_skill.py`.
 
 ## Status
 
-Version: `0.3.0`
+Version: `0.4.0-rc.1`
 
 Development branch: `dev`; release tags are cut from `main` after merge.
 

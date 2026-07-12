@@ -5,7 +5,7 @@
 
 [project]
 name = "world-cup-2026-odds-model"
-version = "0.3.0"
+version = "0.4.0rc1"
 description = "Bookmaker-style football modeling for the 2026 World Cup: Elo, Poisson/Dixon-Coles, market de-margining, a decoupled match-context pipeline, and knockout-stage advancement + tournament simulation."
 readme = "README.md"
 requires-python = ">=3.9"
