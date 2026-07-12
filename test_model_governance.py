@@ -97,7 +97,10 @@ def main() -> None:
     assert paired.n == len(bt.KO_RESULTS)
     assert paired.n >= 24
     assert paired.minimum_for_review == 28
-    assert not paired.gate_reached
+    # Gate is a function of n: the pre-registered review fires at n>=28
+    # (reached 2026-07-12 when the two July 11 QFs were graded; CI still
+    # crossed zero, so the frozen graded-k default stands).
+    assert paired.gate_reached == (paired.n >= paired.minimum_for_review)
     _approx(paired.mean_difference, graded_brier - flat1_brier)
     assert paired.standard_error > 0.0
     assert paired.ci95_low < 0.0 < paired.ci95_high
@@ -115,10 +118,16 @@ def main() -> None:
     assert floor_review.new_identifying_rows == 0
     assert floor_review.decision == "NO_DECISION"
     assert floor_review.official_score_log_loss is None
-    assert not floor_review.gate_reached
+    # Same n-driven gate as the paired review: reached at n>=28 (2026-07-12),
+    # but with zero prospective floor-active rows it stays NO_DECISION.
+    assert floor_review.gate_reached == (len(bt.KO_RESULTS) >= 28)
 
     # The gate and prospective floor activation are both necessary.  Historical
     # floor-active rows cannot be reused after adoption at sequence 24.
+    # Synthetic scenarios below reconstruct the n=25 state they were written
+    # against (sequences 26-28 are synthetic slots), so they stay valid as real
+    # graded rows accumulate past the gate.
+    floor_rows = [row for row in floor_rows if row.sequence <= 25]
     inert = FloorMetricRow(
         sequence=26,
         fixture="NoFloor|Fixture",
@@ -167,11 +176,17 @@ def main() -> None:
     assert draw_floor.fixture_rows == len(bt.KO_RESULTS)
     assert len(draw_floor.cells) == 4
     assert all(cell.n == len(bt.KO_RESULTS) for cell in draw_floor.cells)
-    assert not draw_floor.gate_reached
-    assert draw_floor.decision == "NO_DECISION"
+    # n-driven gate: reached at n>=28 (2026-07-12). At the gate the summary
+    # flags REVIEW_INTERACTION by construction; the measured interaction
+    # (~+0.00003 RPS) is fixture-level noise, so frozen params stand.
+    assert draw_floor.gate_reached == (len(bt.KO_RESULTS) >= 28)
+    assert draw_floor.decision == (
+        "REVIEW_INTERACTION" if draw_floor.gate_reached else "NO_DECISION"
+    )
     first_fixture_cells = [row for row in draw_floor_rows if row.sequence == 1]
     extended_cells = [*draw_floor_rows]
-    for sequence in (26, 27, 28):
+    _base = max(row.sequence for row in draw_floor_rows)
+    for sequence in (_base + 1, _base + 2, _base + 3):
         extended_cells.extend(replace(row, sequence=sequence) for row in first_fixture_cells)
     gated_interaction = summarize_draw_floor_interaction(extended_cells)
     assert gated_interaction.gate_reached
