@@ -11,7 +11,7 @@ weather, and competition-state inputs, and knockout-stage advancement
 Educational and analytical use only. This repository does not provide betting
 advice, staking advice, or guaranteed predictions.
 
-## What v0.2 Includes
+## What v0.3 Includes
 
 - Core match model (v3.7A) with stage profiles: a regression-locked group-stage
   profile and a separate `--stage knockout` profile.
@@ -133,12 +133,18 @@ the forecast issue may be no more than 24 hours old when checked;
 `rain_applied` requires hourly/radar evidence within 3 hours. Missing or stale
 evidence is a blocking error, not a warning.
 
-Use `create_context_template.py --source qf_jul11 --fixture <slug>` to create
-one July 11 QF finalization template, then import the completed CSV with
+`indoor_no_weather` is valid only with official, match-specific roof evidence
+checked within six hours, `roof_status=closed`, and the selected fixture's exact
+`weather_evidence_fixture_id`. A retractable roof by itself is not indoor
+evidence.
+
+Use `create_context_template.py --source sf_jul14_15 --fixture <slug>` to create
+one semifinal finalization template, then import the completed CSV with
 `--require-weather-evidence --context-only`. `predict_jul11.py finalize` writes
-a hashed, create-only artifact for exactly that fixture. After both independent
-finalizations, `predict_jul11.py mc` consumes their stored QF advancement
-probabilities and uses fresh validated Elo only for future rounds. See
+a stage-labelled schema-2, hashed, create-only artifact for exactly that
+fixture; direct two-way advancement odds take precedence over the documented
+90-minute fallback. The historical `predict_jul11.py mc` path remains QF-only.
+See
 [AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md) for the external scheduler
 contract and finalization times.
 See [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md) for the tournament freeze,
@@ -259,9 +265,9 @@ update flow. Rebuild the bundle with `python3 build_skill.py`.
 
 ## Status
 
-Version: `0.2`
+Version: `0.3.0`
 
-Branch target: `release/0.2`
+Development branch: `dev`; release tags are cut from `main` after merge.
 
 The group stage is complete (72/72), and the knockout stage is live: the engine
 now emits advancement probabilities and full-bracket odds.

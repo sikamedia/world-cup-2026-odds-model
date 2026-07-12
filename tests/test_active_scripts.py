@@ -10,10 +10,10 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ACTIVE_SCRIPTS = [
-    *sorted(ROOT.glob("test_*.py")),
-    ROOT / "skill" / "test_regression.py",
-]
+ACTIVE_SCRIPTS = sorted(ROOT.glob("test_*.py"))
+REPO_SKILL_REGRESSION = ROOT / "skill" / "test_regression.py"
+if REPO_SKILL_REGRESSION.is_file():
+    ACTIVE_SCRIPTS.append(REPO_SKILL_REGRESSION)
 
 
 @pytest.mark.parametrize(

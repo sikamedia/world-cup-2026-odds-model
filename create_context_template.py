@@ -24,6 +24,18 @@ QF_JUL11_FIXTURE_KEYS = {
     "norway-england": context_key("Norway", "England"),
     "argentina-switzerland": context_key("Argentina", "Switzerland"),
 }
+SF_JUL14_15_FIXTURES = (
+    ("France", "Spain", "2026-07-14T19:00:00Z"),
+    ("England", "Argentina", "2026-07-15T19:00:00Z"),
+)
+SF_JUL14_15_FIXTURE_KEYS = {
+    "france-spain": context_key("France", "Spain"),
+    "england-argentina": context_key("England", "Argentina"),
+}
+FINALIZATION_FIXTURE_KEYS_BY_SOURCE = {
+    "qf_jul11": QF_JUL11_FIXTURE_KEYS,
+    "sf_jul14_15": SF_JUL14_15_FIXTURE_KEYS,
+}
 
 
 def _base_payload(
@@ -35,6 +47,7 @@ def _base_payload(
 ) -> dict:
     return {
         "market_odds": list(odds) if odds else None,
+        "market_advance_odds": None,
         "market_method": market_method,
         "lineup_home": 1.0,
         "lineup_away": 1.0,
@@ -45,6 +58,8 @@ def _base_payload(
         "weather_forecast_valid_at_utc": None,
         "weather_source": None,
         "weather_evidence_type": None,
+        "roof_status": None,
+        "weather_evidence_fixture_id": None,
         "weather_evidence_snapshot": None,
         "weather_evidence_sha256": None,
         "weather_decision": "none",
@@ -66,6 +81,13 @@ def _csv_rows(matches: dict[str, dict]) -> list[dict[str, object]]:
         else:
             odds_text = ""
             market_home = market_draw = market_away = ""
+        advance_odds = payload.get("market_advance_odds") or ()
+        if len(advance_odds) == 2:
+            advance_odds_text = "/".join(f"{value}" for value in advance_odds)
+            market_advance_home, market_advance_away = advance_odds
+        else:
+            advance_odds_text = ""
+            market_advance_home = market_advance_away = ""
         rows.append(
             {
                 "home": home,
@@ -75,6 +97,9 @@ def _csv_rows(matches: dict[str, dict]) -> list[dict[str, object]]:
                 "market_home": market_home,
                 "market_draw": market_draw,
                 "market_away": market_away,
+                "market_advance_odds": advance_odds_text,
+                "market_advance_home": market_advance_home,
+                "market_advance_away": market_advance_away,
                 "market_method": payload.get("market_method", "proportional"),
                 "lineup_home": payload.get("lineup_home", 1.0),
                 "lineup_away": payload.get("lineup_away", 1.0),
@@ -85,6 +110,8 @@ def _csv_rows(matches: dict[str, dict]) -> list[dict[str, object]]:
                 "weather_forecast_valid_at_utc": payload.get("weather_forecast_valid_at_utc") or "",
                 "weather_source": payload.get("weather_source") or "",
                 "weather_evidence_type": payload.get("weather_evidence_type") or "",
+                "roof_status": payload.get("roof_status") or "",
+                "weather_evidence_fixture_id": payload.get("weather_evidence_fixture_id") or "",
                 "weather_evidence_snapshot": payload.get("weather_evidence_snapshot") or "",
                 "weather_evidence_sha256": payload.get("weather_evidence_sha256") or "",
                 "weather_decision": payload.get("weather_decision", "none"),
@@ -109,6 +136,9 @@ def _write_csv(matches: dict[str, dict], handle) -> None:
         "market_home",
         "market_draw",
         "market_away",
+        "market_advance_odds",
+        "market_advance_home",
+        "market_advance_away",
         "market_method",
         "lineup_home",
         "lineup_away",
@@ -119,6 +149,8 @@ def _write_csv(matches: dict[str, dict], handle) -> None:
         "weather_forecast_valid_at_utc",
         "weather_source",
         "weather_evidence_type",
+        "roof_status",
+        "weather_evidence_fixture_id",
         "weather_evidence_snapshot",
         "weather_evidence_sha256",
         "weather_decision",
@@ -210,6 +242,20 @@ def _from_qf_jul11(market_method: str) -> dict:
     return matches
 
 
+def _from_sf_jul14_15(market_method: str) -> dict:
+    matches = {}
+    for home, away, kickoff_at_utc in SF_JUL14_15_FIXTURES:
+        _add_match(
+            matches,
+            home,
+            away,
+            notes="SF; official roof or outdoor weather evidence required before prediction",
+            market_method=market_method,
+        )
+        matches[context_key(home, away)]["kickoff_at_utc"] = kickoff_at_utc
+    return matches
+
+
 def _from_split(split: str, market_method: str) -> dict:
     if split == "all":
         source = MATCHES_54
@@ -225,7 +271,17 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--source",
-        choices=["jun25", "jun26", "qf_jul11", "stryktipset", "train", "validation", "locked_test", "all"],
+        choices=[
+            "jun25",
+            "jun26",
+            "qf_jul11",
+            "sf_jul14_15",
+            "stryktipset",
+            "train",
+            "validation",
+            "locked_test",
+            "all",
+        ],
         default="jun25",
         help="Which slate/split to create a context template for.",
     )
@@ -248,8 +304,12 @@ def main() -> None:
     )
     ap.add_argument(
         "--fixture",
-        choices=sorted(QF_JUL11_FIXTURE_KEYS),
-        help="For qf_jul11, emit exactly one finalization fixture.",
+        choices=sorted(
+            fixture
+            for fixture_keys in FINALIZATION_FIXTURE_KEYS_BY_SOURCE.values()
+            for fixture in fixture_keys
+        ),
+        help="For a QF/SF finalization source, emit exactly one fixture.",
     )
     ap.add_argument("--output", help="Write the selected output format to this file. Defaults to stdout.")
     args = ap.parse_args()
@@ -260,15 +320,21 @@ def main() -> None:
         matches = _from_jun26(args.market_method)
     elif args.source == "qf_jul11":
         matches = _from_qf_jul11(args.market_method)
+    elif args.source == "sf_jul14_15":
+        matches = _from_sf_jul14_15(args.market_method)
     elif args.source == "stryktipset":
         matches = _from_stryktipset(args.include_existing_odds, args.market_method)
     else:
         matches = _from_split(args.source, args.market_method)
 
     if args.fixture:
-        if args.source != "qf_jul11":
-            ap.error("--fixture is only valid with --source qf_jul11")
-        key = QF_JUL11_FIXTURE_KEYS[args.fixture]
+        fixture_keys = FINALIZATION_FIXTURE_KEYS_BY_SOURCE.get(args.source)
+        if fixture_keys is None:
+            ap.error("--fixture is only valid with a QF/SF finalization source")
+        if args.fixture not in fixture_keys:
+            valid = ", ".join(sorted(fixture_keys))
+            ap.error(f"--fixture {args.fixture!r} is not valid for {args.source}; choose: {valid}")
+        key = fixture_keys[args.fixture]
         matches = {key: matches[key]}
 
     if args.format == "json":

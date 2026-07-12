@@ -40,6 +40,7 @@ WEATHER_DECISION_SCALES = {
     "rain_applied": 0.95,
     "indoor_no_weather": 1.0,
 }
+ROOF_STATUSES = {"closed", "open"}
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,9 @@ class MatchContext:
     competition_state: MatchCompetitionState | None = None
     source_key: str | None = None
     notes: str = ""
+    market_advance_odds: tuple[float, float] | None = None
+    roof_status: str | None = None
+    weather_evidence_fixture_id: str | None = None
 
 
 def context_key(home: str, away: str) -> str:
@@ -74,10 +78,31 @@ def de_margin_odds(
 ) -> tuple[tuple[float, float, float], float]:
     if len(odds) != 3:
         raise ValueError("expected 3-way odds tuple (home, draw, away)")
+    probs, margin = _de_margin_fixed_odds(odds, method=method)
+    return (probs[0], probs[1], probs[2]), margin
+
+
+def de_margin_two_way_odds(
+    odds: tuple[float, float],
+    method: str = "proportional",
+) -> tuple[tuple[float, float], float]:
+    """Remove margin from a direct home/away advancement market."""
+
+    if len(odds) != 2:
+        raise ValueError("expected 2-way odds tuple (home, away)")
+    probs, margin = _de_margin_fixed_odds(odds, method=method)
+    return (probs[0], probs[1]), margin
+
+
+def _de_margin_fixed_odds(
+    odds: tuple[float, ...],
+    *,
+    method: str,
+) -> tuple[tuple[float, ...], float]:
     method = _coerce_market_method(method)
     odds = tuple(float(o) for o in odds)
-    if any(o <= 1.0 for o in odds):
-        raise ValueError("decimal odds must be greater than 1.0")
+    if any(not math.isfinite(o) or o <= 1.0 for o in odds):
+        raise ValueError("decimal odds must be finite and greater than 1.0")
     inv = [1.0 / o for o in odds]
     total = sum(inv)
     if total <= 0:
@@ -124,6 +149,19 @@ def _coerce_odds(raw: Any) -> tuple[float, float, float] | None:
     if not isinstance(raw, (list, tuple)) or len(raw) != 3:
         raise ValueError("market_odds must be a 3-element list/tuple")
     return (float(raw[0]), float(raw[1]), float(raw[2]))
+
+
+def _coerce_advance_odds(raw: Any) -> tuple[float, float] | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        advance_raw = raw.get("market_advance_odds")
+        raw = advance_raw if advance_raw is not None else raw.get("advance_odds")
+    if raw is None:
+        return None
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        raise ValueError("market_advance_odds must be a 2-element list/tuple")
+    return (float(raw[0]), float(raw[1]))
 
 
 def _coerce_market_method(raw: Any) -> str:
@@ -177,6 +215,16 @@ def _coerce_weather_evidence_type(raw: Any) -> str | None:
     return value
 
 
+def _coerce_roof_status(raw: Any) -> str | None:
+    if raw is None or not str(raw).strip():
+        return None
+    value = str(raw).strip().lower().replace("-", "_")
+    if value not in ROOF_STATUSES:
+        allowed = ", ".join(sorted(ROOF_STATUSES))
+        raise ValueError(f"roof_status must be one of: {allowed}")
+    return value
+
+
 def _coerce_weather_decision(raw: Any) -> str:
     text = _coerce_optional_text(raw)
     if text is None:
@@ -224,6 +272,8 @@ def weather_context_has_evidence(context: MatchContext) -> bool:
             context.weather_evidence_type,
             context.weather_evidence_snapshot,
             context.weather_evidence_sha256,
+            context.roof_status,
+            context.weather_evidence_fixture_id,
         )
     )
 
@@ -234,6 +284,7 @@ def validate_weather_context(
     require_evidence: bool = False,
     legacy_heat: str | None = None,
     now_utc: datetime | None = None,
+    expected_fixture_id: str | None = None,
 ) -> list[str]:
     """Validate auditable matchday weather evidence.
 
@@ -342,7 +393,7 @@ def validate_weather_context(
             max_age_hours = None
             if decision == "rain_applied":
                 max_age_hours = 3.0
-            elif decision != "indoor_no_weather":
+            else:
                 max_age_hours = 6.0
             if max_age_hours is not None and evidence_age_hours > max_age_hours:
                 issues.append(
@@ -353,6 +404,18 @@ def validate_weather_context(
     if decision == "indoor_no_weather":
         if context.weather_evidence_type != "official_roof":
             issues.append("indoor_no_weather requires weather_evidence_type=official_roof")
+        if context.roof_status != "closed":
+            issues.append("indoor_no_weather requires roof_status=closed")
+        if not context.weather_evidence_fixture_id:
+            issues.append("indoor_no_weather requires weather_evidence_fixture_id")
+        elif (
+            expected_fixture_id is not None
+            and context.weather_evidence_fixture_id != expected_fixture_id
+        ):
+            issues.append(
+                "weather_evidence_fixture_id does not match the selected fixture: "
+                f"expected {expected_fixture_id!r}, got {context.weather_evidence_fixture_id!r}"
+            )
     else:
         if not context.weather_forecast_issued_at_utc:
             issues.append("outdoor weather evidence requires weather_forecast_issued_at_utc")
@@ -414,6 +477,11 @@ def _coerce_context(payload: Any) -> MatchContext:
         competition_state=coerce_match_state(payload.get("competition_state")),
         source_key=str(payload.get("source_key", "")).strip() or None,
         notes=str(payload.get("notes", "")),
+        market_advance_odds=_coerce_advance_odds(payload),
+        roof_status=_coerce_roof_status(payload.get("roof_status")),
+        weather_evidence_fixture_id=_coerce_optional_text(
+            payload.get("weather_evidence_fixture_id")
+        ),
     )
 
 

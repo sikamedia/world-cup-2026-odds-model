@@ -241,11 +241,17 @@ def main() -> None:
             weather_checked_at_utc="2026-07-11T12:00:00-07:00",
             weather_source="https://stadium.example.org/matchday/roof-status",
             weather_evidence_type="official_roof",
+            roof_status="closed",
+            weather_evidence_fixture_id="2026-QF99-Norway-England",
             weather_evidence_snapshot=roof_snapshot,
             weather_evidence_sha256=_digest(roof_snapshot),
             weather_decision="indoor_no_weather",
         )
-        assert validate_weather_context(roof, require_evidence=True) == []
+        assert validate_weather_context(
+            roof,
+            require_evidence=True,
+            expected_fixture_id="2026-QF99-Norway-England",
+        ) == []
         invalid_roof = MatchContext(
             **{
                 **roof.__dict__,
@@ -255,6 +261,35 @@ def main() -> None:
         assert "indoor_no_weather requires weather_evidence_type=official_roof" in validate_weather_context(
             invalid_roof,
             require_evidence=True,
+        )
+        open_roof = MatchContext(**{**roof.__dict__, "roof_status": "open"})
+        assert "indoor_no_weather requires roof_status=closed" in validate_weather_context(
+            open_roof,
+            require_evidence=True,
+        )
+        wrong_fixture_roof = MatchContext(
+            **{
+                **roof.__dict__,
+                "weather_evidence_fixture_id": "2026-SF101-France-Spain",
+            }
+        )
+        assert any(
+            "does not match the selected fixture" in issue
+            for issue in validate_weather_context(
+                wrong_fixture_roof,
+                require_evidence=True,
+                expected_fixture_id="2026-QF99-Norway-England",
+            )
+        )
+        stale_roof = MatchContext(
+            **{
+                **roof.__dict__,
+                "weather_checked_at_utc": "2026-07-11T14:00:00Z",
+            }
+        )
+        assert any(
+            "indoor_no_weather evidence is stale" in issue
+            for issue in validate_weather_context(stale_roof, require_evidence=True)
         )
 
         # rain_watch is a scale=1 decision; all fixed decision mappings are enforced.
@@ -345,6 +380,66 @@ def main() -> None:
         assert single_rows[0]["home"] == "Norway"
         assert single_rows[0]["away"] == "England"
 
+        sf_template_csv = tmp / "weather_evidence_sf_template.csv"
+        _run(
+            [
+                sys.executable,
+                "create_context_template.py",
+                "--source",
+                "sf_jul14_15",
+                "--format",
+                "csv",
+                "--output",
+                str(sf_template_csv),
+            ]
+        )
+        with sf_template_csv.open(newline="", encoding="utf-8") as handle:
+            sf_rows = {f"{row['home']}|{row['away']}": row for row in csv.DictReader(handle)}
+        assert sf_rows["France|Spain"]["kickoff_at_utc"] == "2026-07-14T19:00:00Z"
+        assert sf_rows["England|Argentina"]["kickoff_at_utc"] == "2026-07-15T19:00:00Z"
+        assert sf_rows["France|Spain"]["market_advance_odds"] == ""
+        assert sf_rows["France|Spain"]["market_advance_home"] == ""
+        assert sf_rows["France|Spain"]["market_advance_away"] == ""
+        assert sf_rows["France|Spain"]["roof_status"] == ""
+        assert sf_rows["France|Spain"]["weather_evidence_fixture_id"] == ""
+
+        sf_single_csv = tmp / "weather_evidence_sf_single.csv"
+        _run(
+            [
+                sys.executable,
+                "create_context_template.py",
+                "--source",
+                "sf_jul14_15",
+                "--fixture",
+                "france-spain",
+                "--format",
+                "csv",
+                "--output",
+                str(sf_single_csv),
+            ]
+        )
+        with sf_single_csv.open(newline="", encoding="utf-8") as handle:
+            sf_single_rows = list(csv.DictReader(handle))
+        assert len(sf_single_rows) == 1
+        assert sf_single_rows[0]["home"] == "France"
+        assert sf_single_rows[0]["away"] == "Spain"
+
+        wrong_sf_fixture = _run(
+            [
+                sys.executable,
+                "create_context_template.py",
+                "--source",
+                "sf_jul14_15",
+                "--fixture",
+                "norway-england",
+                "--format",
+                "csv",
+            ],
+            check=False,
+        )
+        assert wrong_sf_fixture.returncode != 0
+        assert "is not valid for sf_jul14_15" in wrong_sf_fixture.stderr
+
         pipeline_output = tmp / "qf_blank.json"
         pipeline = _run(
             [
@@ -360,6 +455,25 @@ def main() -> None:
         assert pipeline.returncode != 0, pipeline.stdout + pipeline.stderr
         assert "weather evidence requires weather_checked_at_utc" in pipeline.stdout
         assert "Predict June" not in pipeline.stdout
+
+        sf_pipeline_output = tmp / "sf_blank.json"
+        sf_pipeline = _run(
+            [
+                sys.executable,
+                "run_context_pipeline.py",
+                "--fixture-source",
+                "sf_jul14_15",
+                "--fixture",
+                "england-argentina",
+                "--output-json",
+                str(sf_pipeline_output),
+            ],
+            check=False,
+        )
+        assert sf_pipeline.returncode != 0, sf_pipeline.stdout + sf_pipeline.stderr
+        assert "weather evidence requires weather_checked_at_utc" in sf_pipeline.stdout
+        assert "France|Spain" not in sf_pipeline.stdout
+        assert "Predict June" not in sf_pipeline.stdout
 
         # A noncompliant override is blocking in the default pipeline, without --fail-on-warning.
         invalid_pipeline_csv = tmp / "invalid_pipeline.csv"

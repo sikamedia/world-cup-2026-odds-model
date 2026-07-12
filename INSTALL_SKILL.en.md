@@ -46,6 +46,8 @@ football-odds-model/
 |-- competition_state.py
 |-- match_context.py
 |-- model_stability.py
+|-- pyproject.toml
+|-- tests/test_active_scripts.py
 |-- worldcup_2026_data.py
 |-- worldcup_2026_data_jun26.py
 |-- run_context_pipeline.py
@@ -55,10 +57,8 @@ football-odds-model/
 Then run the bundled checks from inside that skill directory:
 
 ```bash
-python3 test_regression.py
-python3 test_odds_api_pipeline.py
-python3 test_competition_state_context.py
-python3 test_jun26_results_scaffold.py
+./run_tests.sh
+python3 -m pytest -q
 ```
 
 ## Using the Skill Scripts Directly
@@ -90,11 +90,11 @@ account data.
 2. Re-import the `.skill` artifact in the UI, or replace the manual
    `football-odds-model/` directory with the freshly built
    `dist/football-odds-model/`.
-3. Run the four checks above.
+3. Run both suite entry points above.
 
 ## Current Skill Version
 
 The current dev branch ships the v3.9 skill bundle: frozen v3.7A group-stage
-profile, locked graded-k knockout advancement profile, KO backtest n=24, and the
-market-context pipeline. Paper-trading ledger tools stay repository-side and are
-not packaged as skill capabilities.
+profile, locked graded-k knockout advancement profile, KO monitoring through
+n=28, and the fail-closed semifinal finalization workflow. Paper-trading ledger
+tools stay repository-side and are not packaged as skill capabilities.

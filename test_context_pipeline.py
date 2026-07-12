@@ -22,8 +22,8 @@ def main() -> None:
     input_csv.write_text(
         "\n".join(
             [
-                "home,away,market_home,market_draw,market_away,market_confidence",
-                "United States,Turkey,1.65,3.60,5.50,0.8",
+                "home,away,market_home,market_draw,market_away,market_advance_odds,market_confidence",
+                "United States,Turkey,1.65,3.60,5.50,1.75/2.15,0.8",
             ]
         )
         + "\n",
@@ -39,6 +39,7 @@ def main() -> None:
                 "matches": {
                     "USA|Turkiye": {
                         "market_odds": [1.70, 3.55, 5.10],
+                        "market_advance_odds": [1.80, 2.10],
                         "market_method": "power",
                         "lineup_home": 0.92,
                         "lineup_away": 1.08,
@@ -91,6 +92,7 @@ def main() -> None:
     data = json.loads(output_json.read_text(encoding="utf-8"))
     merged = data["matches"]["USA|Turkiye"]
     assert merged["market_odds"] == [1.65, 3.60, 5.50]
+    assert merged["market_advance_odds"] == [1.75, 2.15]
     assert merged["market_method"] == "power"
     assert merged["lineup_home"] == 0.92
     assert merged["lineup_away"] == 1.08

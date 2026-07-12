@@ -23,22 +23,62 @@ must be checked within 6 hours of kickoff. Applied rain requires hourly or
 radar evidence checked within 3 hours of kickoff. Evidence timestamps must not
 be later than the current run, and finalization must finish before kickoff. If
 weather validation fails, stop the official prediction path.
+
+Do not infer indoor conditions from a retractable-roof venue. A
+weather_decision=indoor_no_weather decision requires a retained, match-specific
+weather_evidence_type=official_roof HTTP(S) source that explicitly confirms the
+roof will be closed, including roof_status=closed, the selected fixture's exact
+weather_evidence_fixture_id, snapshot, SHA-256, source URL, and a check within
+6 hours of kickoff. Without that confirmation, use the outdoor kickoff-hour
+weather path and fail closed if it cannot be validated.
 ```
 
 The URL appearing in a report or an interactive conversation does not update
 the scheduler's persistent provenance set.
 
-## July 11 finalization schedule
+## July 11 finalization incident (historical)
 
-- Keep the `07:00 UTC` run as preview-only. It must not finalize weather.
-- Run Norway vs England finalization at `2026-07-11 18:05 UTC`, for the
+- The intended plan kept the `07:00 UTC` run preview-only.
+- Norway vs England was due to finalize at `2026-07-11 18:05 UTC`, for the
   `21:00 UTC` kickoff.
-- Run Argentina vs Switzerland finalization at `2026-07-11 22:05 UTC`, for the
-  `2026-07-12 01:00 UTC` kickoff.
-- Fetch a fresh `World.tsv` in each isolated finalization run.
-- After the second artifact exists, run the artifact MC. It may run while the
-  first QF is in progress because it never reads or incorporates live match
-  state and never recalculates either QF probability.
+- Argentina vs Switzerland was due to finalize at `2026-07-11 22:05 UTC`, for
+  the `2026-07-12 01:00 UTC` kickoff.
+- Each isolated run was required to fetch a fresh `World.tsv`.
+- The intended artifact MC could run after the second artifact existed, even
+  while the first QF was in progress, because it never reads or incorporates
+  live match state and never recalculates either QF probability.
+
+Neither isolated finalization actually ran and neither official QF artifact
+exists. The settled ledger rows therefore retain their 07:00 preview values and
+disclose that basis. This section is retained as an incident record, not as an
+active schedule.
+
+## Semifinal finalization schedule
+
+Keep the daily `07:00 UTC` task preview-only. Create and verify these as two
+separate one-time scheduler tasks:
+
+| Task ID | Fixture and kickoff | Run time | One-time `fireAt` |
+|---|---|---|---|
+| `sf101_france_spain_final` | France vs Spain, `2026-07-14 19:00 UTC` | `2026-07-14 16:05 UTC` | `2026-07-14T18:05:00+02:00` |
+| `sf102_england_argentina_final` | England vs Argentina, `2026-07-15 19:00 UTC` | `2026-07-15 16:05 UTC` | `2026-07-15T18:05:00+02:00` |
+
+Use the scheduler's native one-time `fireAt`, not a recurring cron expression;
+the task must auto-disable after firing. Its UI/metadata must show the exact task
+ID, timestamp with the `+02:00` Europe/Stockholm offset, enabled state, selected
+repository folder, completion notification, and web-fetch permission. Keep the
+desktop scheduler open, online, and the host awake through both windows. A
+missed task may run when the app next starts, so the pre-kickoff guard remains
+mandatory and a post-kickoff retry must fail closed.
+
+Each task body must include the persistent block above verbatim, so the literal
+`https://www.eloratings.net/World.tsv` enters that task's provenance set. It
+must also state its fixed fixture, kickoff, scheduled run time, evidence paths,
+context/validation/finalize commands, and every fail-closed condition. A runbook
+entry alone does not create a scheduler task. New tasks do not inherit the daily
+task's permissions: pre-authorize the scheduler's HTTP fetch tool for each task
+so an unattended approval prompt cannot block the run. Create tasks through the
+official scheduler UI/API; never edit its internal JSON storage by hand.
 
 ## Repository handoff
 
@@ -48,12 +88,100 @@ For each finalization run:
 2. Record the actual response-download time. Parse it with
    `fetch_elo_current.py --fetched-at-utc`; parser execution time is not a
    substitute for download time.
-3. Generate a one-fixture `qf_jul11` context template, populate market and
-   weather evidence, and retain the referenced evidence snapshots.
+3. Generate the fixture's one-match context template (`sf_jul14_15` for the
+   semifinals), populate market and weather evidence, and retain every
+   referenced evidence snapshot. Prefer a direct two-way advancement market;
+   if it is unavailable, retain the 90-minute 1X2 market used by the documented
+   draw-resolution fallback.
 4. Run `validate_context.py`; any error blocks prediction.
-5. Run `predict_jul11.py finalize`. It validates only the selected fixture and
+5. Run both `./run_tests.sh` and `python3 -m pytest -q`. Any failure blocks the
+   official prediction path.
+6. Run `predict_jul11.py finalize`. It validates only the selected fixture and
    creates a read-only artifact at a new path. Existing artifacts are never
    overwritten.
+
+France vs Spain example (replace the illustrative fetch timestamp with the
+actual response-download time and populate the context before validation):
+
+```bash
+python3 fetch_elo_current.py \
+  --tsv evidence/World_20260714T1605Z.tsv \
+  --fetched-at-utc 2026-07-14T16:05:30Z \
+  --out elo_sf101.py \
+  --required-team France \
+  --required-team Spain
+
+python3 create_context_template.py \
+  --source sf_jul14_15 \
+  --fixture france-spain \
+  --format csv \
+  --output /tmp/sf101.csv
+
+# Populate market evidence and either outdoor weather evidence or the exact
+# roof_status=closed / weather_evidence_fixture_id=2026-SF101-France-Spain
+# official-roof evidence in /tmp/sf101.csv first.
+python3 run_context_pipeline.py \
+  --input-csv /tmp/sf101.csv \
+  --output-json /tmp/sf101.json \
+  --require-weather-evidence \
+  --context-only
+
+python3 validate_context.py \
+  --context-file /tmp/sf101.json \
+  --require-weather-evidence
+
+./run_tests.sh
+python3 -m pytest -q
+
+python3 predict_jul11.py finalize \
+  --fixture france-spain \
+  --elo-module elo_sf101.py \
+  --elo-source-tsv evidence/World_20260714T1605Z.tsv \
+  --context-file /tmp/sf101.json \
+  --artifact-out evidence/sf101_20260714T1605Z.final.json
+```
+
+England vs Argentina uses the same isolated flow on July 15:
+
+```bash
+python3 fetch_elo_current.py \
+  --tsv evidence/World_20260715T1605Z.tsv \
+  --fetched-at-utc 2026-07-15T16:05:30Z \
+  --out elo_sf102.py \
+  --required-team England \
+  --required-team Argentina
+
+python3 create_context_template.py \
+  --source sf_jul14_15 \
+  --fixture england-argentina \
+  --format csv \
+  --output /tmp/sf102.csv
+
+# Populate market evidence and either outdoor weather evidence or the exact
+# roof_status=closed / weather_evidence_fixture_id=2026-SF102-England-Argentina
+# official-roof evidence in /tmp/sf102.csv first.
+python3 run_context_pipeline.py \
+  --input-csv /tmp/sf102.csv \
+  --output-json /tmp/sf102.json \
+  --require-weather-evidence \
+  --context-only
+
+python3 validate_context.py \
+  --context-file /tmp/sf102.json \
+  --require-weather-evidence
+
+./run_tests.sh
+python3 -m pytest -q
+
+python3 predict_jul11.py finalize \
+  --fixture england-argentina \
+  --elo-module elo_sf102.py \
+  --elo-source-tsv evidence/World_20260715T1605Z.tsv \
+  --context-file /tmp/sf102.json \
+  --artifact-out evidence/sf102_20260715T1605Z.final.json
+```
+
+The July 11 QF commands below are retained for audit and replay only.
 
 Norway vs England example (replace the illustrative fetch timestamp with the
 actual response-download time):
@@ -163,17 +291,35 @@ An official run is valid only when all of the following are true:
   the retained raw response; required-team ratings also match a fresh parse of
   that response.
 - Every participating team is present and none is listed in `ESTIMATES`.
+- `indoor_no_weather` is used only with retained match-specific
+  `official_roof` HTTP(S) evidence checked within six hours that explicitly
+  confirms roof closure, records `roof_status=closed`, and matches the selected
+  `weather_evidence_fixture_id`. A retractable-roof venue without that
+  confirmation follows the outdoor path.
 - Outdoor matches have retained kickoff-hour weather evidence with a matching
   SHA-256 and forecast-valid time.
 - Finalization happens before kickoff, evidence timestamps are not later than
   the run time, and the official output uses frozen `w=0.6` model / `0.4`
   market probabilities.
-- Each QF artifact has a verified canonical payload SHA-256 and was generated
-  before its exact fixture kickoff. Artifact paths are create-only.
+- A direct two-way advancement market is preferred and recorded as
+  `direct_two_way`. When it is absent, the runner may derive the market
+  advancement probability from a valid 90-minute 1X2 market and must record
+  `derived_from_90`; missing usable market inputs block finalization.
+- The artifact records signed model-minus-market gaps for 90-minute outcomes
+  and advancement. Any absolute gap at or above 4 points sets
+  `review_required=true` and must be surfaced in the run report; it is an
+  investigation flag, not permission to change frozen parameters.
+- Each new official artifact uses schema 2 / `pre_registered_match_prediction`,
+  records its stage, has a verified canonical payload SHA-256, and was generated
+  before its exact fixture kickoff. Artifact paths are create-only; the reader
+  remains compatible with the historical schema 1 QF artifacts.
 - MC consumes the two stored official QF advancement probabilities without
   recalculating or republishing them. Fresh Elo is used only for future rounds,
   and the output states that live match state is not incorporated.
-- Injecting a stale Elo snapshot or stale weather evidence exits non-zero and
+- Before finalization, `./run_tests.sh` and `python3 -m pytest -q` both pass.
+- Injecting stale or estimated Elo, missing required teams or market inputs,
+  missing/invalid roof evidence, stale weather, future evidence timestamps, an
+  at-or-after-kickoff run time, or an existing artifact path exits non-zero and
   produces no official probability output.
 
 Run acceptance from a newly started scheduled task. Testing in the interactive

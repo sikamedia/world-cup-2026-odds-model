@@ -34,6 +34,7 @@ SKILL_DIR = REPO / "skill"
 # anyone what to bet"; the paper ledger is project-side calibration
 # infrastructure and must not ship as a skill capability.
 ROOT_PY = [
+    "pyproject.toml",
     "AUTOMATION_RUNBOOK.md",
     "MODEL_GOVERNANCE.md",
     "backtest_66.py",
@@ -78,6 +79,7 @@ ROOT_PY = [
     "test_model_governance.py",
     "test_predict_jul11.py",
     "test_weather_evidence.py",
+    "tests/test_active_scripts.py",
     "the_odds_api.py",
     "train_market_blend.py",
     "train_stable_profile.py",
@@ -109,7 +111,9 @@ def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
         src = REPO / name
         if not src.exists():
             raise SystemExit(f"manifest error: missing root file {name}")
-        shutil.copy2(src, stage / name)
+        dst = stage / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
     # 2) skill-only assets, copied verbatim into the bundle root
     if not SKILL_DIR.is_dir():

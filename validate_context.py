@@ -7,10 +7,24 @@ import argparse
 import sys
 
 from competition_state import match_state_summary
-from match_context import context_key, de_margin_odds, load_context_file, validate_weather_context
+from match_context import (
+    context_key,
+    de_margin_odds,
+    de_margin_two_way_odds,
+    load_context_file,
+    validate_weather_context,
+)
 from model_stability import PROFILE_REGISTRY, STABLE_V35, predict_match, resolve_profile
 from worldcup_2026_data import BATCH_SPLITS, ELO, JUNE_25_MATCHES, MATCHES_54, matches_for_batches
 from worldcup_2026_data_jun26 import JUNE_26_MATCHES
+
+
+FINALIZATION_FIXTURE_IDS = {
+    context_key("Norway", "England"): "2026-QF99-Norway-England",
+    context_key("Argentina", "Switzerland"): "2026-QF100-Argentina-Switzerland",
+    context_key("France", "Spain"): "2026-SF101-France-Spain",
+    context_key("England", "Argentina"): "2026-SF102-England-Argentina",
+}
 
 
 def _parse_profile(raw: str):
@@ -30,6 +44,7 @@ def _known_slates() -> dict[str, list[tuple[str, str]]]:
         "jun25": [(home, away) for home, away, *_ in JUNE_25_MATCHES],
         "jun26": [(home, away) for home, away, *_ in JUNE_26_MATCHES],
         "qf_jul11": [("Norway", "England"), ("Argentina", "Switzerland")],
+        "sf_jul14_15": [("France", "Spain"), ("England", "Argentina")],
     }
     try:
         from predict_stryktipset_8 import M
@@ -76,6 +91,10 @@ def _fmt_prob(values: tuple[float, float, float]) -> str:
     return f"{values[0] * 100:.1f}/{values[1] * 100:.1f}/{values[2] * 100:.1f}%"
 
 
+def _fmt_two_way_prob(values: tuple[float, float]) -> str:
+    return f"{values[0] * 100:.1f}/{values[1] * 100:.1f}%"
+
+
 def _add_issue(bucket: list[str], key: str, message: str) -> None:
     bucket.append(f"{key}: {message}")
 
@@ -92,7 +111,7 @@ def main() -> None:
     ap.add_argument(
         "--gap-threshold",
         type=float,
-        default=0.12,
+        default=0.04,
         help="Warn when any model-vs-market probability gap exceeds this value.",
     )
     ap.add_argument(
@@ -124,8 +143,10 @@ def main() -> None:
     errors: list[str] = []
     warnings: list[str] = []
     margins: list[float] = []
+    advance_margins: list[float] = []
     confidences: list[float] = []
     with_odds = 0
+    with_advance_odds = 0
     large_gaps = 0
     source_keys = 0
     source_key_diff = 0
@@ -149,6 +170,8 @@ def main() -> None:
             or ctx.weather_source is not None
             or ctx.weather_evidence_snapshot is not None
             or ctx.weather_evidence_sha256 is not None
+            or ctx.roof_status is not None
+            or ctx.weather_evidence_fixture_id is not None
         ):
             weather_evidence_rows += 1
         home, away = key.split("|", 1)
@@ -162,6 +185,7 @@ def main() -> None:
             ctx,
             require_evidence=args.require_weather_evidence,
             legacy_heat=info["heat"] if info else None,
+            expected_fixture_id=FINALIZATION_FIXTURE_IDS.get(key),
         )
         for issue in weather_issues:
             _add_issue(errors, key, issue)
@@ -170,53 +194,87 @@ def main() -> None:
             if key in reversed_lookup:
                 _add_issue(errors, key, f"appears reversed; expected '{reversed_lookup[key]}'")
             elif home in ELO and away in ELO:
-                _add_issue(warnings, key, "not found in known played/Jun25/Stryktipset slates")
+                _add_issue(warnings, key, "not found in known fixture slates")
 
         if ctx.market_odds is None:
             _add_issue(warnings, key, "missing market_odds; excluded from market blend training")
         else:
             with_odds += 1
-            confidences.append(ctx.market_confidence)
             try:
                 market_probs, margin = de_margin_odds(ctx.market_odds, method=ctx.market_method)
                 margins.append(margin)
             except Exception as exc:
                 _add_issue(errors, key, f"invalid odds: {exc}")
-                continue
+            else:
+                if margin < -0.02:
+                    _add_issue(warnings, key, f"negative overround {margin * 100:.1f}%")
+                if margin > 0.15:
+                    _add_issue(warnings, key, f"high overround {margin * 100:.1f}%")
+                if ctx.market_confidence < 0.5:
+                    _add_issue(warnings, key, f"low market_confidence {ctx.market_confidence:.2f}")
+                if max(market_probs) > 0.90:
+                    _add_issue(warnings, key, f"very concentrated market probabilities {_fmt_prob(market_probs)}")
 
-            if margin < -0.02:
-                _add_issue(warnings, key, f"negative overround {margin * 100:.1f}%")
-            if margin > 0.15:
-                _add_issue(warnings, key, f"high overround {margin * 100:.1f}%")
-            if ctx.market_confidence < 0.5:
-                _add_issue(warnings, key, f"low market_confidence {ctx.market_confidence:.2f}")
-            if max(market_probs) > 0.90:
-                _add_issue(warnings, key, f"very concentrated market probabilities {_fmt_prob(market_probs)}")
+                if info is not None and not weather_issues:
+                    pred = predict_match(
+                        args.profile,
+                        info["home"],
+                        info["away"],
+                        host_home=info["host_home"],
+                        heat=info["heat"],
+                        mot_home=info["mot_home"],
+                        mot_away=info["mot_away"],
+                        lineup_home=ctx.lineup_home,
+                        lineup_away=ctx.lineup_away,
+                        weather_scale=ctx.weather_scale,
+                        market_odds=ctx.market_odds,
+                        market_method=ctx.market_method,
+                        competition_state=ctx.competition_state,
+                    )
+                    if pred.market_gap is not None and max(abs(value) for value in pred.market_gap) >= args.gap_threshold:
+                        large_gaps += 1
+                        _add_issue(
+                            warnings,
+                            key,
+                            f"large model-market gap {_fmt_prob(tuple(abs(v) for v in pred.market_gap))}; "
+                            "check team order and missing team news",
+                        )
 
-            if info is not None and not weather_issues:
-                pred = predict_match(
-                    args.profile,
-                    info["home"],
-                    info["away"],
-                    host_home=info["host_home"],
-                    heat=info["heat"],
-                    mot_home=info["mot_home"],
-                    mot_away=info["mot_away"],
-                    lineup_home=ctx.lineup_home,
-                    lineup_away=ctx.lineup_away,
-                    weather_scale=ctx.weather_scale,
-                    market_odds=ctx.market_odds,
-                    market_method=ctx.market_method,
-                    competition_state=ctx.competition_state,
+        if ctx.market_advance_odds is not None:
+            with_advance_odds += 1
+            try:
+                advance_probs, advance_margin = de_margin_two_way_odds(
+                    ctx.market_advance_odds,
+                    method=ctx.market_method,
                 )
-                if pred.market_gap is not None and max(abs(value) for value in pred.market_gap) >= args.gap_threshold:
-                    large_gaps += 1
+                advance_margins.append(advance_margin)
+            except Exception as exc:
+                _add_issue(errors, key, f"invalid advancement odds: {exc}")
+            else:
+                if advance_margin < -0.02:
                     _add_issue(
                         warnings,
                         key,
-                        f"large model-market gap {_fmt_prob(tuple(abs(v) for v in pred.market_gap))}; "
-                        "check team order and missing team news",
+                        f"negative advancement overround {advance_margin * 100:.1f}%",
                     )
+                if advance_margin > 0.15:
+                    _add_issue(
+                        warnings,
+                        key,
+                        f"high advancement overround {advance_margin * 100:.1f}%",
+                    )
+                if max(advance_probs) > 0.90:
+                    _add_issue(
+                        warnings,
+                        key,
+                        "very concentrated advancement market probabilities "
+                        f"{_fmt_two_way_prob(advance_probs)}",
+                    )
+
+        if ctx.market_odds is not None or ctx.market_advance_odds is not None:
+            confidences.append(ctx.market_confidence)
+            if ctx.market_confidence < 0.5 and ctx.market_odds is None:
+                _add_issue(warnings, key, f"low market_confidence {ctx.market_confidence:.2f}")
 
         if not 0.75 <= ctx.lineup_home <= 1.25:
             _add_issue(warnings, key, f"lineup_home scale looks extreme: {ctx.lineup_home:.2f}")
@@ -232,7 +290,10 @@ def main() -> None:
     print("=" * 88)
     print(f"Context quality report | file={args.context_file} | profile={args.profile.name}")
     print("=" * 88)
-    print(f"context rows: {len(contexts)}  with market_odds: {with_odds}")
+    print(
+        f"context rows: {len(contexts)}  with market_odds: {with_odds}  "
+        f"with market_advance_odds: {with_advance_odds}"
+    )
     if source_keys:
         print(f"source_key rows: {source_keys}  differing from canonical: {source_key_diff}")
     if competition_states:
@@ -243,6 +304,11 @@ def main() -> None:
         print(
             f"overround: avg={sum(margins) / len(margins) * 100:.1f}%  "
             f"min={min(margins) * 100:.1f}%  max={max(margins) * 100:.1f}%"
+        )
+    if advance_margins:
+        print(
+            f"advancement overround: avg={sum(advance_margins) / len(advance_margins) * 100:.1f}%  "
+            f"min={min(advance_margins) * 100:.1f}%  max={max(advance_margins) * 100:.1f}%"
         )
     if confidences:
         print(
@@ -256,13 +322,20 @@ def main() -> None:
         total = len(matches)
         context_hits = 0
         odds_hits = 0
+        advance_odds_hits = 0
         for home, away in matches:
             ctx = contexts.get(context_key(home, away))
             if ctx is not None:
                 context_hits += 1
                 if ctx.market_odds is not None:
                     odds_hits += 1
-        print(f"  {name:<11} context {context_hits:>2}/{total:<2}  market_odds {odds_hits:>2}/{total:<2}")
+                if ctx.market_advance_odds is not None:
+                    advance_odds_hits += 1
+        print(
+            f"  {name:<12} context {context_hits:>2}/{total:<2}  "
+            f"market_odds {odds_hits:>2}/{total:<2}  "
+            f"advance_odds {advance_odds_hits:>2}/{total:<2}"
+        )
 
     if errors:
         print("\nErrors")

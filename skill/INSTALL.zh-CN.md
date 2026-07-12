@@ -16,9 +16,9 @@
 | `draw_boost` | 0.07 | **0.06** | 模型平局率重新贴合 54 场样本。 |
 | `avg_goals` | 2.85 | **2.90** | 大小球 2.5 校准更好。 |
 
-72 场小组赛回归测试锁定 v3.7A profile。淘汰赛单独建批次：截至 2026-07-08，
-`backtest_ko.py` 校验 KO n=24，晋级判对 18/24，v3.9 lambda floor 下 90 分钟
-RPS 0.1502。graded-k 淘汰赛 profile 继续锁定；flat-k 仍只监控。
+72 场小组赛回归测试锁定 v3.7A profile。淘汰赛单独建批次：截至 2026-07-12，
+`backtest_ko.py` 校验 KO n=28，晋级判对 22/28，v3.9 lambda floor 下 90 分钟
+RPS 0.1472。graded-k 淘汰赛 profile 继续锁定；flat-k 仍只监控。
 
 ## 安装
 
@@ -36,28 +36,29 @@ RPS 0.1502。graded-k 淘汰赛 profile 继续锁定；flat-k 仍只监控。
 - `competition_state.py`、`match_context.py`、`team_aliases.py`、
   `worldcup_2026_data.py`、`worldcup_2026_data_jun26.py`、
   `worldcup_2026_data_ko.py`、`model_stability.py` 和 `market_blend.py`
-- 测试：`test_regression.py`、`test_odds_api_pipeline.py`、
-  `test_competition_state_context.py`、`test_jun26_results_scaffold.py`
+- `pyproject.toml`、`tests/test_active_scripts.py`，以及两套测试入口所需的
+  全部 active regression scripts
 
 ## 验证
 
 在安装后的 skill 目录运行：
 
 ```bash
-python3 test_regression.py
+./run_tests.sh
+python3 -m pytest -q
 python3 backtest_ko.py
-python3 test_odds_api_pipeline.py
-python3 test_competition_state_context.py
-python3 test_jun26_results_scaffold.py
 ```
 
 预期通过标记：
 
-- `ALL v3.6 REGRESSION CHECKS PASSED`
-- `KNOCKOUT BACKTEST — 24 game(s)`
-- `ODDS_API_PIPELINE_REGRESSION PASS`
-- `COMPETITION_STATE_CONTEXT_REGRESSION PASS`
-- `JUN26_RESULTS_SCAFFOLD PASS`
+- `All tests passed.`
+- skill 包内为 `10 passed`（仓库内为 `11 passed`；paper-ledger 测试按设计不打包）
+- `KNOCKOUT BACKTEST — 28 game(s)`
+
+当前淘汰赛 finalization 运行 `create_context_template.py` 并传入
+`--source sf_jul14_15 --fixture <slug>`。确认闭顶棚时必须记录 `roof_status=closed`、
+精确的 `weather_evidence_fixture_id`，并保留开球前 6 小时内核查的官方证据。
+一次性调度与 fail-closed 命令见 `AUTOMATION_RUNBOOK.md`。
 
 ## 快速上手
 

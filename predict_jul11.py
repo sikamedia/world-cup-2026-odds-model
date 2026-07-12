@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed July 11 QF finalization and artifact-based bracket MC."""
+"""Fail-closed knockout finalization and July 11 artifact-based bracket MC."""
 
 from __future__ import annotations
 
@@ -18,7 +18,14 @@ import tempfile
 from typing import Any, Sequence
 
 from elo_snapshot import EloSnapshot, EloSnapshotError, OFFICIAL_ELO_SOURCE, load_elo_snapshot
-from match_context import MatchContext, context_key, de_margin_odds, load_context_file, validate_weather_context
+from match_context import (
+    MatchContext,
+    context_key,
+    de_margin_odds,
+    de_margin_two_way_odds,
+    load_context_file,
+    validate_weather_context,
+)
 
 try:
     from skill.scripts import match_model as mm
@@ -32,8 +39,11 @@ except ModuleNotFoundError:
 KO = mm.STAGE_PROFILES["knockout"]
 MODEL_WEIGHT = 0.6
 MARKET_WEIGHT = 1.0 - MODEL_WEIGHT
-ARTIFACT_SCHEMA_VERSION = 1
-ARTIFACT_TYPE = "pre_registered_qf_prediction"
+MARKET_GAP_REVIEW_THRESHOLD = 0.04
+ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_TYPE = "pre_registered_match_prediction"
+LEGACY_QF_ARTIFACT_SCHEMA_VERSION = 1
+LEGACY_QF_ARTIFACT_TYPE = "pre_registered_qf_prediction"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -41,6 +51,7 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 class Fixture:
     slug: str
     fixture_id: str
+    stage: str
     home: str
     away: str
     kickoff_at_utc: str
@@ -52,6 +63,7 @@ FIXTURES = {
         Fixture(
             "norway-england",
             "2026-QF99-Norway-England",
+            "quarterfinal",
             "Norway",
             "England",
             "2026-07-11T21:00:00Z",
@@ -59,13 +71,31 @@ FIXTURES = {
         Fixture(
             "argentina-switzerland",
             "2026-QF100-Argentina-Switzerland",
+            "quarterfinal",
             "Argentina",
             "Switzerland",
             "2026-07-12T01:00:00Z",
         ),
+        Fixture(
+            "france-spain",
+            "2026-SF101-France-Spain",
+            "semifinal",
+            "France",
+            "Spain",
+            "2026-07-14T19:00:00Z",
+        ),
+        Fixture(
+            "england-argentina",
+            "2026-SF102-England-Argentina",
+            "semifinal",
+            "England",
+            "Argentina",
+            "2026-07-15T19:00:00Z",
+        ),
     )
 }
-QF_FIXTURES = tuple(FIXTURES.values())
+QF_FIXTURES = tuple(fixture for fixture in FIXTURES.values() if fixture.stage == "quarterfinal")
+QF_FIXTURE_SLUGS = frozenset(fixture.slug for fixture in QF_FIXTURES)
 
 
 class PredictionRunError(ValueError):
@@ -155,21 +185,51 @@ def _official_prediction(model: dict[str, Any], context: MatchContext) -> dict[s
         raise PredictionRunError(
             "official w=0.6 ensemble requires three-way market_odds in match context"
         )
-    market_wdl, margin = de_margin_odds(context.market_odds, context.market_method)
+    try:
+        market_wdl, margin = de_margin_odds(context.market_odds, context.market_method)
+        if context.market_advance_odds is not None:
+            market_advance, advance_margin = de_margin_two_way_odds(
+                context.market_advance_odds,
+                context.market_method,
+            )
+            market_advance_home = market_advance[0]
+            advance_method = "direct_two_way"
+        else:
+            market_advance_home = (
+                market_wdl[0] + market_wdl[1] * model["draw_resolution_home"]
+            )
+            advance_margin = None
+            advance_method = "derived_from_90"
+    except ValueError as exc:
+        raise PredictionRunError(f"official market validation failed: {exc}") from exc
     model_wdl = (model["home_prob"], model["draw_prob"], model["away_prob"])
     official_wdl = tuple(
         MODEL_WEIGHT * model_prob + MARKET_WEIGHT * market_prob
         for model_prob, market_prob in zip(model_wdl, market_wdl)
     )
-    market_advance_home = market_wdl[0] + market_wdl[1] * model["draw_resolution_home"]
     official_advance_home = (
         MODEL_WEIGHT * model["advance_home"] + MARKET_WEIGHT * market_advance_home
     )
+    market_gap_wdl = tuple(
+        model_prob - market_prob
+        for model_prob, market_prob in zip(model_wdl, market_wdl)
+    )
+    market_gap_advance_home = model["advance_home"] - market_advance_home
+    max_market_gap = max(
+        max(abs(value) for value in market_gap_wdl),
+        abs(market_gap_advance_home),
+    )
+    market_gap_review_required = max_market_gap >= MARKET_GAP_REVIEW_THRESHOLD
     return {
         **model,
         "market_wdl": market_wdl,
         "market_margin": margin,
         "market_advance_home": market_advance_home,
+        "market_advance_margin": advance_margin,
+        "market_advance_method": advance_method,
+        "market_gap_wdl": market_gap_wdl,
+        "market_gap_advance_home": market_gap_advance_home,
+        "market_gap_review_required": market_gap_review_required,
         "official_wdl": official_wdl,
         "official_advance_home": official_advance_home,
     }
@@ -206,6 +266,8 @@ def _weather_payload(context: MatchContext) -> dict[str, Any]:
         "forecast_valid_at_utc": context.weather_forecast_valid_at_utc,
         "source": context.weather_source,
         "evidence_type": context.weather_evidence_type,
+        "roof_status": context.roof_status,
+        "evidence_fixture_id": context.weather_evidence_fixture_id,
         "evidence_snapshot": context.weather_evidence_snapshot,
         "evidence_sha256": context.weather_evidence_sha256,
     }
@@ -226,6 +288,7 @@ def _build_artifact(
         "fixture": {
             "slug": fixture.slug,
             "fixture_id": fixture.fixture_id,
+            "stage": fixture.stage,
             "home": fixture.home,
             "away": fixture.away,
             "kickoff_at_utc": fixture.kickoff_at_utc,
@@ -253,6 +316,7 @@ def _build_artifact(
         },
         "market": {
             "odds_90": list(context.market_odds or ()),
+            "odds_advance": list(context.market_advance_odds or ()),
             "demargin_method": context.market_method,
             "margin": prediction["market_margin"],
             "wdl_90": {
@@ -261,8 +325,21 @@ def _build_artifact(
                 "away": prediction["market_wdl"][2],
             },
             "advance_home": prediction["market_advance_home"],
-            "advance_method": "wdl_90_plus_model_elo_draw_resolution",
-            "draw_resolution_home": prediction["draw_resolution_home"],
+            "advance_margin": prediction["market_advance_margin"],
+            "advance_method": prediction["market_advance_method"],
+            "draw_resolution_home": (
+                prediction["draw_resolution_home"]
+                if prediction["market_advance_method"] == "derived_from_90"
+                else None
+            ),
+            "model_gap_90": {
+                "home": prediction["market_gap_wdl"][0],
+                "draw": prediction["market_gap_wdl"][1],
+                "away": prediction["market_gap_wdl"][2],
+            },
+            "model_gap_advance_home": prediction["market_gap_advance_home"],
+            "review_threshold": MARKET_GAP_REVIEW_THRESHOLD,
+            "review_required": prediction["market_gap_review_required"],
             "source_key": context.source_key,
         },
         "official": {
@@ -368,7 +445,12 @@ def _validate_finalize_context(
     context: MatchContext,
     now: datetime,
 ) -> None:
-    issues = validate_weather_context(context, require_evidence=True, now_utc=now)
+    issues = validate_weather_context(
+        context,
+        require_evidence=True,
+        now_utc=now,
+        expected_fixture_id=fixture.fixture_id,
+    )
     try:
         actual_kickoff = _parse_utc(context.kickoff_at_utc or "", "kickoff_at_utc")
         expected_kickoff = _parse_utc(fixture.kickoff_at_utc, "fixture kickoff")
@@ -454,6 +536,15 @@ def _show_finalized(artifact: dict[str, Any], output: Path) -> None:
         f"  OFFICIAL advance {fixture['home']} {official['advance_home'] * 100:.1f}% / "
         f"{fixture['away']} {(1.0 - official['advance_home']) * 100:.1f}%"
     )
+    if market["review_required"]:
+        max_gap = max(
+            abs(market["model_gap_90"][side]) for side in ("home", "draw", "away")
+        )
+        max_gap = max(max_gap, abs(market["model_gap_advance_home"]))
+        print(
+            f"  REVIEW FLAG model-market gap {max_gap * 100:.1f}pt >= "
+            f"{market['review_threshold'] * 100:.1f}pt; investigate missing information"
+        )
     print(
         f"  weather {weather['decision']} x{weather['scale']:.2f}; "
         f"checked {weather['checked_at_utc']}; sha256={weather['evidence_sha256']}"
@@ -491,7 +582,13 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         raise ArtifactError(
             f"artifact hash mismatch for {artifact_path}: stored={digest}, actual={actual_digest}"
         )
-    if payload.get("schema_version") != ARTIFACT_SCHEMA_VERSION or payload.get("artifact_type") != ARTIFACT_TYPE:
+    schema_identity = (payload.get("schema_version"), payload.get("artifact_type"))
+    is_current = schema_identity == (ARTIFACT_SCHEMA_VERSION, ARTIFACT_TYPE)
+    is_legacy_qf = schema_identity == (
+        LEGACY_QF_ARTIFACT_SCHEMA_VERSION,
+        LEGACY_QF_ARTIFACT_TYPE,
+    )
+    if not is_current and not is_legacy_qf:
         raise ArtifactError(f"artifact {artifact_path} has unsupported schema/type")
     fixture_payload = payload.get("fixture")
     if not isinstance(fixture_payload, dict):
@@ -505,6 +602,14 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         and fixture_payload.get("away") == fixture.away
         and fixture_payload.get("kickoff_at_utc") == fixture.kickoff_at_utc
     )
+    if is_current:
+        expected_identity = expected_identity and fixture_payload.get("stage") == fixture.stage
+    else:
+        expected_identity = (
+            expected_identity
+            and fixture.slug in QF_FIXTURE_SLUGS
+            and "stage" not in fixture_payload
+        )
     if not expected_identity:
         raise ArtifactError(f"artifact {artifact_path} has an unexpected fixture identity")
     generated = _parse_utc(payload.get("generated_at_utc", ""), "generated_at_utc")
@@ -586,8 +691,8 @@ def _run_mc(args: argparse.Namespace, *, now: datetime) -> None:
         if fixture.slug in artifacts:
             raise ArtifactError(f"duplicate artifact for {fixture.fixture_id}")
         artifacts[fixture.slug] = (fixture, advance_home, digest)
-    if set(artifacts) != set(FIXTURES):
-        missing = sorted(set(FIXTURES) - set(artifacts))
+    if set(artifacts) != QF_FIXTURE_SLUGS:
+        missing = sorted(QF_FIXTURE_SLUGS - set(artifacts))
         raise ArtifactError(f"exactly one artifact per July 11 QF is required; missing={missing}")
 
     required_teams = [
@@ -644,7 +749,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    finalize = subparsers.add_parser("finalize", help="Finalize exactly one pre-kickoff QF")
+    finalize = subparsers.add_parser("finalize", help="Finalize exactly one pre-kickoff fixture")
     finalize.add_argument("--fixture", choices=sorted(FIXTURES), required=True)
     finalize.add_argument("--context-file", required=True)
     finalize.add_argument("--artifact-out", required=True)
