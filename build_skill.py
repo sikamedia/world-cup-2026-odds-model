@@ -55,6 +55,7 @@ ROOT_PY = [
     "team_news.py",
     "worldcup_2026_data_jun28.py",
     "worldcup_2026_data_ko.py",
+    "capture_elo_evidence.py",
     "competition_state.py",
     "create_context_template.py",
     "evaluate_market_context.py",

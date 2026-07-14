@@ -24,10 +24,11 @@ here and in the next generated report.
   because they were frozen pre-match with current Elo and market inputs. Their
   missing official artifacts are disclosed in notes and are not grounds for a
   post-result cohort change.
-- Official schema-2 artifacts record model-minus-market 90-minute and
-  advancement gaps. An absolute gap of at least 4 points sets a review flag for
-  missing information; it does not authorize a parameter adjustment during the
-  tournament freeze.
+- New official schema-3 artifacts record direct-HTTP Elo receipt provenance and
+  model-minus-market 90-minute and advancement gaps. Historical schema-2
+  artifacts remain readable. An absolute gap of at least 4 points sets a review
+  flag for missing information; it does not authorize a parameter adjustment
+  during the tournament freeze.
 
 ## 90-minute style cohort
 

@@ -8,16 +8,86 @@ import hashlib
 import json
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
 
+from capture_elo_evidence import MAX_ELO_BODY_BYTES, capture_elo_evidence
 from elo_snapshot import EloSnapshotError, OFFICIAL_ELO_SOURCE, load_elo_snapshot
 
 
 ROOT = Path(__file__).resolve().parent
 NOW = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
 VALID_HASH = "a" * 64
+CAPTURE_METHOD = "direct_http_response_body"
+RECEIPT_ARTIFACT_TYPE = "elo_http_capture_receipt"
+
+
+class _FakeResponse:
+    """Small urllib-compatible response used to exercise byte capture."""
+
+    def __init__(
+        self,
+        body: bytes,
+        *,
+        status: int = 200,
+        final_url: str = OFFICIAL_ELO_SOURCE,
+        fail_on_read: bool = False,
+    ) -> None:
+        self.status = status
+        self._body = body
+        self._offset = 0
+        self._final_url = final_url
+        self.url = final_url
+        self._fail_on_read = fail_on_read
+        self.headers: dict[str, str] = {}
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def getcode(self) -> int:
+        return self.status
+
+    def geturl(self) -> str:
+        return self._final_url
+
+    def read(self, size: int = -1) -> bytes:
+        if self._fail_on_read:
+            raise OSError("synthetic interrupted response")
+        if self._offset >= len(self._body):
+            return b""
+        if size is None or size < 0:
+            size = len(self._body) - self._offset
+        chunk = self._body[self._offset : self._offset + size]
+        self._offset += len(chunk)
+        return chunk
+
+
+class _FakeOpener:
+    """Supports both a callable opener and urllib's ``opener.open`` shape."""
+
+    def __init__(self, response: _FakeResponse) -> None:
+        self.response = response
+        self.calls: list[tuple[object, float | int | None]] = []
+
+    def open(
+        self,
+        request: object,
+        timeout: float | int | None = None,
+    ) -> _FakeResponse:
+        self.calls.append((request, timeout))
+        return self.response
+
+    def __call__(
+        self,
+        request: object,
+        timeout: float | int | None = None,
+    ) -> _FakeResponse:
+        return self.open(request, timeout=timeout)
 
 
 def _snapshot_text(
@@ -46,8 +116,9 @@ def _snapshot_text(
 
 
 def _expect_error(path: Path, message: str, **kwargs) -> None:
+    kwargs.setdefault("now_utc", NOW)
     try:
-        load_elo_snapshot(path, now_utc=NOW, **kwargs)
+        load_elo_snapshot(path, **kwargs)
     except EloSnapshotError as exc:
         assert message in str(exc), str(exc)
     else:
@@ -81,9 +152,221 @@ def _world_tsv() -> str:
     )
 
 
+def _capture(
+    tsv_path: Path,
+    receipt_path: Path,
+    *,
+    body: bytes,
+    completed_at: datetime,
+    response: _FakeResponse | None = None,
+) -> tuple[dict[str, object], _FakeOpener]:
+    fake_response = response or _FakeResponse(body)
+    opener = _FakeOpener(fake_response)
+    capture_elo_evidence(
+        tsv_path,
+        receipt_path,
+        timeout_seconds=7,
+        opener=opener,
+        clock=lambda: completed_at,
+    )
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    return receipt, opener
+
+
+def _run_fetch(
+    tsv_path: Path,
+    output_path: Path,
+    *,
+    receipt_path: Path | None = None,
+    fetched_at_utc: str | None = None,
+    allow_unverified_replay: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        sys.executable,
+        str(ROOT / "fetch_elo_current.py"),
+        "--tsv",
+        str(tsv_path),
+        "--out",
+        str(output_path),
+        "--required-team",
+        "Argentina",
+        "--required-team",
+        "Switzerland",
+    ]
+    if receipt_path is not None:
+        command.extend(["--receipt", str(receipt_path)])
+    if fetched_at_utc is not None:
+        command.extend(["--fetched-at-utc", fetched_at_utc])
+    if allow_unverified_replay:
+        command.append("--allow-unverified-replay")
+    return subprocess.run(
+        command,
+        cwd=tsv_path.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _expect_capture_error(
+    tsv_path: Path,
+    receipt_path: Path,
+    response: _FakeResponse,
+    *,
+    message: str,
+) -> None:
+    opener = _FakeOpener(response)
+    try:
+        capture_elo_evidence(
+            tsv_path,
+            receipt_path,
+            opener=opener,
+            clock=lambda: NOW,
+        )
+    except Exception as exc:
+        assert message.lower() in str(exc).lower(), str(exc)
+    else:
+        raise AssertionError(f"expected capture failure containing {message!r}")
+    assert not tsv_path.exists()
+    assert not receipt_path.exists()
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
+
+        # The capture layer must preserve the HTTP response body exactly. BOM,
+        # CRLF, trailing blank lines, and non-text bytes are deliberately kept.
+        raw_body = b"\xef\xbb\xbf1\t1\tES\t2177\r\n2\t2\tAR\t2156\r\n\r\n\x00"
+        byte_tsv = tmp / "elo_evidence_bytes_World.tsv"
+        byte_receipt = tmp / "elo_evidence_bytes_World.receipt.json"
+        completed_at = NOW - timedelta(minutes=5)
+        receipt, opener = _capture(
+            byte_tsv,
+            byte_receipt,
+            body=raw_body,
+            completed_at=completed_at,
+        )
+        assert byte_tsv.read_bytes() == raw_body
+        assert len(opener.calls) == 1
+        request, timeout = opener.calls[0]
+        assert timeout == 7
+        assert getattr(request, "full_url", request) == OFFICIAL_ELO_SOURCE
+        if hasattr(request, "get_header"):
+            assert request.get_header("Accept-encoding") == "identity"
+        expected_receipt = {
+            "schema_version": 1,
+            "artifact_type": RECEIPT_ARTIFACT_TYPE,
+            "capture_method": CAPTURE_METHOD,
+            "requested_url": OFFICIAL_ELO_SOURCE,
+            "final_url": OFFICIAL_ELO_SOURCE,
+            "http_status": 200,
+            "response_completed_at_utc": "2026-07-10T11:55:00Z",
+            "evidence_file": byte_tsv.name,
+            "body_byte_count": len(raw_body),
+            "body_sha256": hashlib.sha256(raw_body).hexdigest(),
+        }
+        for field, expected in expected_receipt.items():
+            assert receipt[field] == expected, (field, receipt[field], expected)
+
+        # Both outputs are create-only. An existing destination is never
+        # overwritten, and a reserved receipt prevents creating its TSV peer.
+        existing_tsv = tmp / "existing_World.tsv"
+        existing_tsv.write_bytes(b"keep-existing-tsv")
+        existing_receipt = tmp / "existing.receipt.json"
+        existing_opener = _FakeOpener(_FakeResponse(raw_body))
+        try:
+            capture_elo_evidence(
+                existing_tsv,
+                existing_receipt,
+                opener=existing_opener,
+                clock=lambda: NOW,
+            )
+        except Exception as exc:
+            assert "exist" in str(exc).lower(), str(exc)
+        else:
+            raise AssertionError("capture unexpectedly overwrote an existing TSV")
+        assert existing_tsv.read_bytes() == b"keep-existing-tsv"
+        assert not existing_receipt.exists()
+
+        reserved_tsv = tmp / "reserved_World.tsv"
+        reserved_receipt = tmp / "reserved.receipt.json"
+        reserved_receipt.write_bytes(b"keep-existing-receipt")
+        reserved_opener = _FakeOpener(_FakeResponse(raw_body))
+        try:
+            capture_elo_evidence(
+                reserved_tsv,
+                reserved_receipt,
+                opener=reserved_opener,
+                clock=lambda: NOW,
+            )
+        except Exception as exc:
+            assert "exist" in str(exc).lower(), str(exc)
+        else:
+            raise AssertionError("capture unexpectedly overwrote an existing receipt")
+        assert not reserved_tsv.exists()
+        assert reserved_receipt.read_bytes() == b"keep-existing-receipt"
+
+        _expect_capture_error(
+            tmp / "status_World.tsv",
+            tmp / "status.receipt.json",
+            _FakeResponse(raw_body, status=503),
+            message="503",
+        )
+        _expect_capture_error(
+            tmp / "redirect_World.tsv",
+            tmp / "redirect.receipt.json",
+            _FakeResponse(raw_body, final_url="https://mirror.example/World.tsv"),
+            message="final",
+        )
+        _expect_capture_error(
+            tmp / "interrupted_World.tsv",
+            tmp / "interrupted.receipt.json",
+            _FakeResponse(raw_body, fail_on_read=True),
+            message="interrupted",
+        )
+        truncated_response = _FakeResponse(raw_body)
+        truncated_response.headers["Content-Length"] = str(len(raw_body) + 1)
+        _expect_capture_error(
+            tmp / "truncated_World.tsv",
+            tmp / "truncated.receipt.json",
+            truncated_response,
+            message="Content-Length mismatch",
+        )
+        declared_oversized = _FakeResponse(raw_body)
+        declared_oversized.headers["Content-Length"] = str(MAX_ELO_BODY_BYTES + 1)
+        _expect_capture_error(
+            tmp / "declared_oversized_World.tsv",
+            tmp / "declared_oversized.receipt.json",
+            declared_oversized,
+            message="exceeds",
+        )
+        _expect_capture_error(
+            tmp / "streamed_oversized_World.tsv",
+            tmp / "streamed_oversized.receipt.json",
+            _FakeResponse(b"x" * (MAX_ELO_BODY_BYTES + 1)),
+            message="exceeds",
+        )
+
+        deadline_tsv = tmp / "deadline_World.tsv"
+        deadline_receipt = tmp / "deadline.receipt.json"
+        deadline_ticks = iter((0.0, 31.0))
+        try:
+            capture_elo_evidence(
+                deadline_tsv,
+                deadline_receipt,
+                timeout_seconds=30,
+                opener=_FakeOpener(_FakeResponse(raw_body)),
+                clock=lambda: NOW,
+                monotonic_clock=lambda: next(deadline_ticks),
+            )
+        except Exception as exc:
+            assert "exceeded" in str(exc), str(exc)
+        else:
+            raise AssertionError("capture unexpectedly exceeded its wall-clock deadline")
+        assert not deadline_tsv.exists()
+        assert not deadline_receipt.exists()
+
         fresh = tmp / "fresh.py"
         fresh.write_text(_snapshot_text(), encoding="utf-8")
         loaded = load_elo_snapshot(
@@ -162,28 +445,29 @@ def main() -> None:
             check=False,
         )
         assert unstamped_proc.returncode != 0
-        assert "--fetched-at-utc" in unstamped_proc.stderr
+        assert (
+            "--receipt" in unstamped_proc.stderr
+            or "--fetched-at-utc" in unstamped_proc.stderr
+        )
         assert not unstamped_output.exists()
 
-        generated_proc = subprocess.run(
-            [
-                sys.executable,
-                str(ROOT / "fetch_elo_current.py"),
-                "--tsv",
-                str(tsv),
-                "--out",
-                str(generated),
-                "--required-team",
-                "Argentina",
-                "--required-team",
-                "Switzerland",
-                "--fetched-at-utc",
-                "2026-07-10T11:00:00Z",
-            ],
-            cwd=tmp,
-            capture_output=True,
-            text=True,
-            check=False,
+        # Caller-stamped timestamps are replay-only and require an explicit
+        # opt-in. They remain useful for historical work but are ineligible
+        # for the official direct-capture contract.
+        replay_denied = _run_fetch(
+            tsv,
+            generated,
+            fetched_at_utc="2026-07-10T11:00:00Z",
+        )
+        assert replay_denied.returncode != 0
+        assert "--allow-unverified-replay" in replay_denied.stderr
+        assert not generated.exists()
+
+        generated_proc = _run_fetch(
+            tsv,
+            generated,
+            fetched_at_utc="2026-07-10T11:00:00Z",
+            allow_unverified_replay=True,
         )
         assert generated_proc.returncode == 0, generated_proc.stderr
         emitted = runpy.run_path(str(generated))
@@ -199,6 +483,280 @@ def main() -> None:
             now_utc=NOW,
             expected_source_sha256=tsv_sha256,
             source_tsv=tsv,
+        )
+        _expect_error(
+            generated,
+            "direct",
+            required_teams=["Argentina", "Switzerland"],
+            now_utc=NOW,
+            source_tsv=tsv,
+            require_direct_capture=True,
+        )
+
+        # A captured response and its receipt are the only inputs eligible for
+        # official use. The generated module binds both the body and receipt.
+        direct_body = _world_tsv().encode("utf-8")
+        direct_tsv = tmp / "elo_evidence_20260710T1155Z_World.tsv"
+        direct_receipt = tmp / "elo_evidence_20260710T1155Z_World.receipt.json"
+        direct_receipt_payload, _ = _capture(
+            direct_tsv,
+            direct_receipt,
+            body=direct_body,
+            completed_at=completed_at,
+        )
+        direct_module = tmp / "elo_current_direct.py"
+        direct_proc = _run_fetch(
+            direct_tsv,
+            direct_module,
+            receipt_path=direct_receipt,
+        )
+        assert direct_proc.returncode == 0, direct_proc.stderr
+        direct_emitted = runpy.run_path(str(direct_module))
+        receipt_sha256 = hashlib.sha256(direct_receipt.read_bytes()).hexdigest()
+        assert direct_emitted["FETCHED_AT_UTC"] == "2026-07-10T11:55:00Z"
+        assert direct_emitted["SOURCE"] == OFFICIAL_ELO_SOURCE
+        assert direct_emitted["SOURCE_SHA256"] == hashlib.sha256(direct_body).hexdigest()
+        assert direct_emitted["SOURCE_RECEIPT_SHA256"] == receipt_sha256
+        assert direct_emitted["CAPTURE_METHOD"] == CAPTURE_METHOD
+        assert direct_emitted["SOURCE_BYTE_COUNT"] == len(direct_body)
+        direct_loaded = load_elo_snapshot(
+            direct_module,
+            required_teams=["Argentina", "Switzerland"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            source_receipt=direct_receipt,
+            require_direct_capture=True,
+        )
+        assert direct_loaded.ratings["Argentina"] == 2156
+
+        _expect_error(
+            direct_module,
+            "receipt",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            source_receipt=tmp / "missing.receipt.json",
+            require_direct_capture=True,
+        )
+        _expect_error(
+            direct_module,
+            "receipt",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            require_direct_capture=True,
+        )
+
+        receipt_field_cases = (
+            ("schema_bool", {"schema_version": True}, "schema_version"),
+            ("artifact_type", {"artifact_type": "wrong"}, "artifact_type"),
+            ("capture_method", {"capture_method": "copied_file"}, "capture_method"),
+            ("requested_url", {"requested_url": "https://example.com/World.tsv"}, "requested_url"),
+            ("final_url", {"final_url": "https://example.com/World.tsv"}, "final_url"),
+            ("http_status", {"http_status": 201}, "http_status"),
+        )
+        for stem, changes, expected_message in receipt_field_cases:
+            invalid_receipt = tmp / f"{stem}.receipt.json"
+            invalid_payload = dict(direct_receipt_payload)
+            invalid_payload.update(changes)
+            invalid_receipt.write_text(
+                json.dumps(invalid_payload, sort_keys=True) + "\n",
+                encoding="ascii",
+            )
+            invalid_receipt_sha = hashlib.sha256(invalid_receipt.read_bytes()).hexdigest()
+            invalid_module = tmp / f"{stem}.py"
+            invalid_module.write_text(
+                direct_module.read_text(encoding="utf-8").replace(
+                    receipt_sha256,
+                    invalid_receipt_sha,
+                ),
+                encoding="utf-8",
+            )
+            _expect_error(
+                invalid_module,
+                expected_message,
+                required_teams=["Argentina"],
+                now_utc=NOW,
+                source_tsv=direct_tsv,
+                source_receipt=invalid_receipt,
+                require_direct_capture=True,
+            )
+
+        malformed_receipt = tmp / "malformed.receipt.json"
+        malformed_receipt.write_bytes(b"{not-json\n")
+        malformed_receipt_sha = hashlib.sha256(malformed_receipt.read_bytes()).hexdigest()
+        malformed_module = tmp / "malformed_receipt.py"
+        malformed_module.write_text(
+            direct_module.read_text(encoding="utf-8").replace(
+                receipt_sha256,
+                malformed_receipt_sha,
+            ),
+            encoding="utf-8",
+        )
+        _expect_error(
+            malformed_module,
+            "cannot parse",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            source_receipt=malformed_receipt,
+            require_direct_capture=True,
+        )
+
+        tampered_receipt = tmp / "tampered.receipt.json"
+        tampered_payload = dict(direct_receipt_payload)
+        tampered_payload["body_byte_count"] = len(direct_body) + 1
+        tampered_receipt.write_text(
+            json.dumps(tampered_payload, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tampered_receipt_sha = hashlib.sha256(tampered_receipt.read_bytes()).hexdigest()
+        tampered_module = tmp / "elo_current_tampered_receipt.py"
+        tampered_module.write_text(
+            direct_module.read_text(encoding="utf-8").replace(
+                receipt_sha256,
+                tampered_receipt_sha,
+            ),
+            encoding="utf-8",
+        )
+        _expect_error(
+            tampered_module,
+            "byte",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            source_receipt=tampered_receipt,
+            require_direct_capture=True,
+        )
+
+        reserialized_receipt = tmp / "reserialized.receipt.json"
+        reserialized_receipt.write_bytes(direct_receipt.read_bytes() + b"\n")
+        _expect_error(
+            direct_module,
+            "receipt SHA-256 mismatch",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            source_receipt=reserialized_receipt,
+            require_direct_capture=True,
+        )
+
+        bad_body_hash_receipt = tmp / "bad_body_hash.receipt.json"
+        bad_body_hash_payload = dict(direct_receipt_payload)
+        bad_body_hash_payload["body_sha256"] = "0" * 64
+        bad_body_hash_receipt.write_text(
+            json.dumps(bad_body_hash_payload, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        _expect_error(
+            direct_module,
+            "SHA-256 mismatch",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=direct_tsv,
+            source_receipt=bad_body_hash_receipt,
+            require_direct_capture=True,
+        )
+
+        # Renaming an identical byte copy does not make it the response named
+        # by the receipt. Reject it at both generation and load boundaries.
+        renamed_tsv = tmp / "renamed_copy_World.tsv"
+        shutil.copyfile(direct_tsv, renamed_tsv)
+        renamed_module = tmp / "renamed_copy.py"
+        renamed_proc = _run_fetch(
+            renamed_tsv,
+            renamed_module,
+            receipt_path=direct_receipt,
+        )
+        assert renamed_proc.returncode != 0
+        assert "evidence_file" in renamed_proc.stderr
+        assert not renamed_module.exists()
+        _expect_error(
+            direct_module,
+            "evidence_file",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=renamed_tsv,
+            source_receipt=direct_receipt,
+            require_direct_capture=True,
+        )
+
+        stale_direct_tsv = tmp / "elo_evidence_20260710T1129Z_World.tsv"
+        stale_direct_receipt = (
+            tmp / "elo_evidence_20260710T1129Z_World.receipt.json"
+        )
+        _capture(
+            stale_direct_tsv,
+            stale_direct_receipt,
+            body=direct_body,
+            completed_at=NOW - timedelta(minutes=31),
+        )
+        stale_direct_module = tmp / "elo_current_stale_direct.py"
+        stale_direct_proc = _run_fetch(
+            stale_direct_tsv,
+            stale_direct_module,
+            receipt_path=stale_direct_receipt,
+        )
+        assert stale_direct_proc.returncode == 0, stale_direct_proc.stderr
+        _expect_error(
+            stale_direct_module,
+            "stale",
+            required_teams=["Argentina"],
+            max_age_hours=0.5,
+            now_utc=NOW,
+            source_tsv=stale_direct_tsv,
+            source_receipt=stale_direct_receipt,
+            require_direct_capture=True,
+        )
+
+        future_direct_tsv = tmp / "elo_evidence_20260710T1201Z_World.tsv"
+        future_direct_receipt = (
+            tmp / "elo_evidence_20260710T1201Z_World.receipt.json"
+        )
+        _capture(
+            future_direct_tsv,
+            future_direct_receipt,
+            body=direct_body,
+            completed_at=NOW + timedelta(minutes=1),
+        )
+        future_direct_module = tmp / "elo_current_future_direct.py"
+        future_direct_proc = _run_fetch(
+            future_direct_tsv,
+            future_direct_module,
+            receipt_path=future_direct_receipt,
+        )
+        assert future_direct_proc.returncode == 0, future_direct_proc.stderr
+        _expect_error(
+            future_direct_module,
+            "future",
+            required_teams=["Argentina"],
+            now_utc=NOW,
+            source_tsv=future_direct_tsv,
+            source_receipt=future_direct_receipt,
+            require_direct_capture=True,
+        )
+
+        # A caller cannot pair an old receipt with a newly stamped module to
+        # bypass freshness. The module timestamp must equal response completion.
+        old_timestamp = "2026-07-10T11:29:00Z"
+        restamped_timestamp = "2026-07-10T11:55:00Z"
+        old_receipt_restamped_module = tmp / "elo_current_old_receipt_restamped.py"
+        old_receipt_restamped_module.write_text(
+            stale_direct_module.read_text(encoding="utf-8").replace(
+                old_timestamp,
+                restamped_timestamp,
+            ),
+            encoding="utf-8",
+        )
+        _expect_error(
+            old_receipt_restamped_module,
+            "receipt",
+            required_teams=["Argentina"],
+            max_age_hours=0.5,
+            now_utc=NOW,
+            source_tsv=stale_direct_tsv,
+            source_receipt=stale_direct_receipt,
+            require_direct_capture=True,
         )
 
         changed_tsv = tmp / "changed_World.tsv"
@@ -254,6 +812,7 @@ def main() -> None:
                 "Scotland",
                 "--fetched-at-utc",
                 "2026-07-10T11:00:00Z",
+                "--allow-unverified-replay",
             ],
             cwd=tmp,
             capture_output=True,
@@ -300,14 +859,25 @@ def main() -> None:
             encoding="utf-8",
         )
         runtime_tsv = tmp / "runtime_World.tsv"
-        runtime_tsv.write_text(_world_tsv(), encoding="utf-8")
-        runtime_sha256 = hashlib.sha256(runtime_tsv.read_bytes()).hexdigest()
+        runtime_receipt = tmp / "runtime_World.receipt.json"
+        _capture(
+            runtime_tsv,
+            runtime_receipt,
+            body=_world_tsv().encode("utf-8"),
+            completed_at=runtime_now,
+        )
+        fresh_runtime = tmp / "fresh_runtime.py"
+        fresh_runtime_proc = _run_fetch(
+            runtime_tsv,
+            fresh_runtime,
+            receipt_path=runtime_receipt,
+        )
+        assert fresh_runtime_proc.returncode == 0, fresh_runtime_proc.stderr
         estimated_runtime = tmp / "estimated_runtime.py"
         estimated_runtime.write_text(
-            _snapshot_text(
-                fetched_at=datetime.now(timezone.utc),
-                source_sha256=runtime_sha256,
-                estimates=("Switzerland",),
+            fresh_runtime.read_text(encoding="utf-8").replace(
+                "ESTIMATES = []",
+                "ESTIMATES = ['Switzerland']",
             ),
             encoding="utf-8",
         )
@@ -328,6 +898,8 @@ def main() -> None:
                 str(estimated_runtime),
                 "--elo-source-tsv",
                 str(runtime_tsv),
+                "--elo-receipt",
+                str(runtime_receipt),
                 "--max-odds-age-minutes",
                 "0",
             ],
@@ -340,14 +912,6 @@ def main() -> None:
         assert "estimated Elo" in signal_proc.stderr
         assert not signals.exists()
 
-        fresh_runtime = tmp / "fresh_runtime.py"
-        fresh_runtime.write_text(
-            _snapshot_text(
-                fetched_at=datetime.now(timezone.utc),
-                source_sha256=runtime_sha256,
-            ),
-            encoding="utf-8",
-        )
         success_proc = subprocess.run(
             [
                 sys.executable,
@@ -364,6 +928,8 @@ def main() -> None:
                 str(fresh_runtime),
                 "--elo-source-tsv",
                 str(runtime_tsv),
+                "--elo-receipt",
+                str(runtime_receipt),
                 "--max-odds-age-minutes",
                 "0",
             ],
@@ -402,6 +968,8 @@ def main() -> None:
                 str(fresh_runtime),
                 "--elo-source-tsv",
                 str(runtime_tsv),
+                "--elo-receipt",
+                str(runtime_receipt),
                 "--max-odds-age-minutes",
                 "0",
             ],

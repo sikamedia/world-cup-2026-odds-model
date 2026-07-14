@@ -17,7 +17,13 @@ import sys
 import tempfile
 from typing import Any, Sequence
 
-from elo_snapshot import EloSnapshot, EloSnapshotError, OFFICIAL_ELO_SOURCE, load_elo_snapshot
+from elo_snapshot import (
+    DIRECT_HTTP_CAPTURE_METHOD,
+    EloSnapshot,
+    EloSnapshotError,
+    OFFICIAL_ELO_SOURCE,
+    load_elo_snapshot,
+)
 from match_context import (
     MatchContext,
     context_key,
@@ -40,10 +46,13 @@ KO = mm.STAGE_PROFILES["knockout"]
 MODEL_WEIGHT = 0.6
 MARKET_WEIGHT = 1.0 - MODEL_WEIGHT
 MARKET_GAP_REVIEW_THRESHOLD = 0.04
-ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_SCHEMA_VERSION = 3
 ARTIFACT_TYPE = "pre_registered_match_prediction"
+LEGACY_MATCH_ARTIFACT_SCHEMA_VERSION = 2
 LEGACY_QF_ARTIFACT_SCHEMA_VERSION = 1
 LEGACY_QF_ARTIFACT_TYPE = "pre_registered_qf_prediction"
+ELO_PROVENANCE_CONTRACT = "direct_http_v1"
+OFFICIAL_ELO_MAX_AGE_HOURS = 0.5
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -281,6 +290,9 @@ def _build_artifact(
     source_tsv: Path,
     generated_at: datetime,
 ) -> dict[str, Any]:
+    receipt = snapshot.capture_receipt
+    if receipt is None:
+        raise PredictionRunError("official artifact requires direct Elo capture provenance")
     top_scores = sorted(prediction["matrix"].items(), key=lambda item: -item[1])[:5]
     payload = {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -359,10 +371,15 @@ def _build_artifact(
             "notes": context.notes,
         },
         "elo_provenance": {
+            "provenance_contract": ELO_PROVENANCE_CONTRACT,
             "source": snapshot.source,
             "source_sha256": snapshot.source_sha256,
             "fetched_at_utc": _utc_text(snapshot.fetched_at_utc),
             "retained_tsv_name": source_tsv.name,
+            "capture_method": receipt.capture_method,
+            "receipt_sha256": receipt.receipt_sha256,
+            "retained_receipt_name": Path(receipt.receipt_ref).name,
+            "body_byte_count": receipt.body_byte_count,
             "ratings": {
                 fixture.home: snapshot.ratings[fixture.home],
                 fixture.away: snapshot.ratings[fixture.away],
@@ -420,6 +437,7 @@ def _load_snapshot(
     *,
     elo_module: str,
     elo_source_tsv: str,
+    elo_receipt: str,
     required_teams: Sequence[str],
     max_age_hours: float,
     now: datetime,
@@ -434,6 +452,8 @@ def _load_snapshot(
             max_age_hours=max_age_hours,
             now_utc=now,
             source_tsv=source_tsv,
+            source_receipt=elo_receipt,
+            require_direct_capture=True,
         )
     except EloSnapshotError as exc:
         raise PredictionRunError(f"official Elo validation failed: {exc}") from exc
@@ -479,6 +499,7 @@ def _finalize(
     *,
     elo_module: str,
     elo_source_tsv: str,
+    elo_receipt: str,
     context_file: str,
     artifact_out: str,
     max_elo_age_hours: float,
@@ -487,8 +508,9 @@ def _finalize(
     snapshot, source_tsv = _load_snapshot(
         elo_module=elo_module,
         elo_source_tsv=elo_source_tsv,
+        elo_receipt=elo_receipt,
         required_teams=[fixture.home, fixture.away],
-        max_age_hours=max_elo_age_hours,
+        max_age_hours=min(max_elo_age_hours, OFFICIAL_ELO_MAX_AGE_HOURS),
         now=now,
     )
     try:
@@ -582,13 +604,20 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         raise ArtifactError(
             f"artifact hash mismatch for {artifact_path}: stored={digest}, actual={actual_digest}"
         )
-    schema_identity = (payload.get("schema_version"), payload.get("artifact_type"))
+    schema_version = payload.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ArtifactError(f"artifact {artifact_path} has invalid schema_version type")
+    schema_identity = (schema_version, payload.get("artifact_type"))
     is_current = schema_identity == (ARTIFACT_SCHEMA_VERSION, ARTIFACT_TYPE)
+    is_legacy_match = schema_identity == (
+        LEGACY_MATCH_ARTIFACT_SCHEMA_VERSION,
+        ARTIFACT_TYPE,
+    )
     is_legacy_qf = schema_identity == (
         LEGACY_QF_ARTIFACT_SCHEMA_VERSION,
         LEGACY_QF_ARTIFACT_TYPE,
     )
-    if not is_current and not is_legacy_qf:
+    if not is_current and not is_legacy_match and not is_legacy_qf:
         raise ArtifactError(f"artifact {artifact_path} has unsupported schema/type")
     fixture_payload = payload.get("fixture")
     if not isinstance(fixture_payload, dict):
@@ -602,7 +631,7 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         and fixture_payload.get("away") == fixture.away
         and fixture_payload.get("kickoff_at_utc") == fixture.kickoff_at_utc
     )
-    if is_current:
+    if is_current or is_legacy_match:
         expected_identity = expected_identity and fixture_payload.get("stage") == fixture.stage
     else:
         expected_identity = (
@@ -625,6 +654,34 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         raise ArtifactError(f"artifact {artifact_path} has invalid Elo source provenance")
     if not isinstance(elo.get("source_sha256"), str) or _SHA256_RE.fullmatch(elo["source_sha256"]) is None:
         raise ArtifactError(f"artifact {artifact_path} has invalid Elo SHA-256 provenance")
+    if is_current:
+        if elo.get("provenance_contract") != ELO_PROVENANCE_CONTRACT:
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo provenance contract")
+        if elo.get("capture_method") != DIRECT_HTTP_CAPTURE_METHOD:
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo capture method")
+        receipt_sha256 = elo.get("receipt_sha256")
+        if not isinstance(receipt_sha256, str) or _SHA256_RE.fullmatch(receipt_sha256) is None:
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo receipt SHA-256")
+        receipt_name = elo.get("retained_receipt_name")
+        if (
+            not isinstance(receipt_name, str)
+            or not receipt_name
+            or Path(receipt_name).name != receipt_name
+        ):
+            raise ArtifactError(f"artifact {artifact_path} has invalid retained Elo receipt name")
+        body_byte_count = elo.get("body_byte_count")
+        if (
+            isinstance(body_byte_count, bool)
+            or not isinstance(body_byte_count, int)
+            or body_byte_count <= 0
+        ):
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo body byte count")
+        captured_at = _parse_utc(
+            elo.get("fetched_at_utc", ""),
+            "elo_provenance.fetched_at_utc",
+        )
+        if captured_at > generated:
+            raise ArtifactError(f"artifact {artifact_path} Elo capture completed after generation")
     official = payload.get("official")
     if not isinstance(official, dict):
         raise ArtifactError(f"artifact {artifact_path} is missing official probabilities")
@@ -706,6 +763,7 @@ def _run_mc(args: argparse.Namespace, *, now: datetime) -> None:
     snapshot, _source_tsv = _load_snapshot(
         elo_module=args.elo_module,
         elo_source_tsv=args.elo_source_tsv,
+        elo_receipt=args.elo_receipt,
         required_teams=required_teams,
         max_age_hours=args.max_elo_age_hours,
         now=now,
@@ -742,7 +800,13 @@ def _run_mc(args: argparse.Namespace, *, now: datetime) -> None:
 def _add_elo_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--elo-module", default="elo_current_latest.py")
     parser.add_argument("--elo-source-tsv", required=True)
-    parser.add_argument("--max-elo-age-hours", type=float, default=24.0)
+    parser.add_argument("--elo-receipt", required=True)
+    parser.add_argument(
+        "--max-elo-age-hours",
+        type=float,
+        default=24.0,
+        help="maximum Elo age; finalize is always hard-capped at 0.5 hours",
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -776,6 +840,7 @@ def main(argv: Sequence[str] | None = None, *, now_utc: datetime | None = None) 
                 FIXTURES[args.fixture],
                 elo_module=args.elo_module,
                 elo_source_tsv=args.elo_source_tsv,
+                elo_receipt=args.elo_receipt,
                 context_file=args.context_file,
                 artifact_out=args.artifact_out,
                 max_elo_age_hours=args.max_elo_age_hours,

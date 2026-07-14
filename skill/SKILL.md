@@ -359,26 +359,40 @@ Single-match football has an irreducible floor; honest expectations:
 Run from the skill directory (numpy needed only for the Monte Carlo;
 `match_model.py` is pure-stdlib):
 
-- `python fetch_elo_current.py --tsv <World.tsv> --fetched-at-utc <ACTUAL_TIME>
-  --out elo_current_latest.py --required-team <TEAM> ...` creates a SHA-256-
-  labelled current Elo module. Saved TSV input requires its actual download
-  time; official paths reparse the raw TSV and fail closed on stale, missing,
-  mismatched, or estimated participant ratings.
+- `python capture_elo_evidence.py --tsv-out <World.tsv> --receipt-out
+  <receipt.json> [--timeout-seconds 30]` is the only supported acquisition path
+  for current Elo. It writes the direct, unmodified HTTP response body and a
+  matching receipt to new create-only paths. Never copy or reuse an older TSV,
+  reconstruct it from parsed data, transcode it, or normalize newlines. The
+  receipt's response-completion timestamp is authoritative. If capture fails,
+  a daily run produces no Elo preview and an official run produces no
+  single-point probability. The local unsigned receipt is an audit binding,
+  not a cryptographic attestation: stronger protection against a deliberately
+  forged same-named TSV/receipt pair requires signed or external append-only
+  scheduler logs.
+- `python fetch_elo_current.py --tsv <World.tsv> --receipt <receipt.json> --out
+  elo_current_latest.py --required-team <TEAM> ...` creates a SHA-256-labelled
+  current Elo module from that exact pair. Official paths reparse the raw bytes
+  and fail closed on stale, missing, mismatched, or estimated participant
+  ratings; official finalization never accepts Elo more than 30 minutes after
+  response completion.
 - `python predict_jul11.py finalize --fixture
   {norway-england,argentina-switzerland,france-spain,england-argentina}
-  --elo-module <elo.py> --elo-source-tsv <World.tsv> --context-file <context.json>
-  --artifact-out <final.json>` finalizes exactly one pre-kickoff knockout match
-  into a create-only hashed schema-2 `pre_registered_match_prediction` artifact
-  with its stage recorded, using frozen w=0.6 model / 0.4 market. A direct
+  --elo-module <elo.py> --elo-source-tsv <World.tsv> --elo-receipt
+  <receipt.json> --context-file <context.json> --artifact-out <final.json>`
+  finalizes exactly one pre-kickoff knockout match into a create-only hashed
+  schema-3 `pre_registered_match_prediction` artifact with its direct-HTTP
+  receipt and stage recorded, using frozen w=0.6 model / 0.4 market. A direct
   two-way advancement market is preferred; otherwise the artifact explicitly
-  marks the 90-minute-market fallback. The reader remains compatible with the
-  historical schema-1 QF artifacts.
+  marks the 90-minute-market fallback. The reader remains compatible with
+  historical schema-1 and schema-2 artifacts.
 - `python predict_jul11.py mc --artifacts <qf99.json> <qf100.json> --elo-module
-  <elo.py> --elo-source-tsv <World.tsv> --qf98-winner {Spain,Belgium}` consumes
-  the stored QF probabilities without recalculation; fresh Elo is used only for
-  future SF/final simulations and live match state is not incorporated. For the
-  semifinals, generate a one-match context with `--source sf_jul14_15` and
-  follow `AUTOMATION_RUNBOOK.md` for the two isolated finalization windows.
+  <elo.py> --elo-source-tsv <World.tsv> --elo-receipt <receipt.json>
+  --qf98-winner {Spain,Belgium}` consumes the stored QF probabilities without
+  recalculation; fresh, receipt-verified Elo is used only for future SF/final
+  simulations and live match state is not incorporated. For the semifinals,
+  generate a one-match context with `--source sf_jul14_15` and follow
+  `AUTOMATION_RUNBOOK.md` for the two isolated finalization windows.
 - `python scripts/match_model.py --lh 1.95 --la 0.85 --odds 1.53 4.25 6.70`
   Pass λ directly, *or* `--elo 1891 1775 [--home 85]` to derive λ. Adjustment
   flags (applied after λ is set, with a printout of what changed):
@@ -459,7 +473,8 @@ June-26 result update path:
    Use `--source jun26` for the June 26 slate or `--source sf_jul14_15` for the
    semifinals. Semifinal templates also accept optional direct two-way
    `market_advance_odds`; their de-margin method is the row's `market_method`.
-   Official schema-2 artifacts retain signed model-minus-market gaps and set a
+   Official schema-3 artifacts retain direct-HTTP receipt provenance and signed
+   model-minus-market gaps, and set a
    review flag at 4 points; the flag prompts investigation and never changes
    frozen parameters automatically.
 2. `python fetch_the_odds_api.py --fixture-csv <template.csv> --fixture-json
@@ -484,6 +499,10 @@ compatibility. Example:
 Weather provenance is mandatory for current predictions, including no-adjustment
 outdoor decisions. Historical replay may load legacy rows, but any asserted
 weather override must still pass `validate_weather_context`.
+Current Elo provenance is likewise mandatory for daily and official runs: use
+the create-only direct-response capture and its receipt, never a copied or
+reconstructed TSV. Unverified legacy input is replay-only and cannot enter an
+official artifact or a current-data paper signal.
 Before an official finalization, both `./run_tests.sh` and
 `python3 -m pytest -q` must pass. The repository suite currently covers 12/12
 standalone scripts through the pytest adapter; the packaged skill covers 10/10

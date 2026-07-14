@@ -342,6 +342,10 @@ def main() -> None:
         help="Retained raw World.tsv used to verify SOURCE_SHA256 (required for current Elo).",
     )
     ap.add_argument(
+        "--elo-receipt",
+        help="Direct HTTP capture receipt (required for current Elo).",
+    )
+    ap.add_argument(
         "--max-elo-age-hours",
         type=float,
         default=24.0,
@@ -399,6 +403,8 @@ def main() -> None:
     if args.elo_source == "current":
         if not args.elo_source_tsv:
             ap.error("--elo-source-tsv is required when --elo-source=current")
+        if not args.elo_receipt:
+            ap.error("--elo-receipt is required when --elo-source=current")
         source_tsv = Path(args.elo_source_tsv)
         if not source_tsv.is_file():
             ap.error(f"retained World.tsv does not exist: {source_tsv}")
@@ -411,6 +417,8 @@ def main() -> None:
                 required_teams=required_teams,
                 max_age_hours=args.max_elo_age_hours,
                 source_tsv=source_tsv,
+                source_receipt=args.elo_receipt,
+                require_direct_capture=True,
             )
         except EloSnapshotError as exc:
             ap.error(f"current Elo validation failed: {exc}")

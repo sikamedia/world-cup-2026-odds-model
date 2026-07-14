@@ -4,21 +4,18 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import stat
-import subprocess
-import sys
 import tempfile
 
+import fetch_elo_current
+from elo_snapshot import load_elo_capture_receipt, parse_world_tsv_bytes
 import predict_jul11
-
-
-ROOT = Path(__file__).resolve().parent
 
 
 def _world_tsv() -> str:
@@ -52,34 +49,53 @@ def _make_elo(
     fetched_at: str,
     *,
     estimates: tuple[str, ...] = (),
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path]:
     source_tsv = tmp / f"{stem}_World.tsv"
+    receipt = tmp / f"{stem}_receipt.json"
     module = tmp / f"{stem}_elo.py"
-    source_tsv.write_text(_world_tsv(), encoding="utf-8")
-    process = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "fetch_elo_current.py"),
-            "--tsv",
-            str(source_tsv),
-            "--out",
-            str(module),
-            "--fetched-at-utc",
-            fetched_at,
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    source_bytes = _world_tsv().encode("utf-8")
+    source_tsv.write_bytes(source_bytes)
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "artifact_type": "elo_http_capture_receipt",
+                "capture_method": "direct_http_response_body",
+                "requested_url": "https://www.eloratings.net/World.tsv",
+                "final_url": "https://www.eloratings.net/World.tsv",
+                "http_status": 200,
+                "response_completed_at_utc": fetched_at,
+                "evidence_file": source_tsv.name,
+                "body_byte_count": len(source_bytes),
+                "body_sha256": hashlib.sha256(source_bytes).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="ascii",
     )
-    assert process.returncode == 0, process.stderr
+    fixture_now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    capture_receipt = load_elo_capture_receipt(
+        receipt,
+        source_tsv=source_tsv,
+        source_bytes=source_bytes,
+        now_utc=fixture_now,
+    )
+    with redirect_stdout(io.StringIO()):
+        fetch_elo_current.emit_module(
+            parse_world_tsv_bytes(source_bytes, source_tsv),
+            module,
+            source_bytes=source_bytes,
+            fetched_at_utc=capture_receipt.response_completed_at_utc,
+            capture_receipt=capture_receipt,
+        )
     if estimates:
         text = module.read_text(encoding="utf-8")
         module.write_text(
             text.replace("ESTIMATES = []", f"ESTIMATES = {list(estimates)!r}"),
             encoding="utf-8",
         )
-    return module, source_tsv
+    return module, source_tsv, receipt
 
 
 def _weather_row(
@@ -162,6 +178,7 @@ def _finalize_args(
     fixture: str,
     module: Path,
     source_tsv: Path,
+    receipt: Path,
     context: Path,
     artifact: Path,
 ) -> list[str]:
@@ -173,6 +190,8 @@ def _finalize_args(
         str(module),
         "--elo-source-tsv",
         str(source_tsv),
+        "--elo-receipt",
+        str(receipt),
         "--context-file",
         str(context),
         "--artifact-out",
@@ -185,6 +204,7 @@ def _mc_args(
     artifacts: tuple[Path, Path],
     module: Path,
     source_tsv: Path,
+    receipt: Path,
 ) -> list[str]:
     return [
         "mc",
@@ -195,6 +215,8 @@ def _mc_args(
         str(module),
         "--elo-source-tsv",
         str(source_tsv),
+        "--elo-receipt",
+        str(receipt),
         "--qf98-winner",
         "Spain",
         "--sims",
@@ -207,11 +229,21 @@ def _mc_args(
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
-        first_module, first_tsv = _make_elo(tmp, "qf99", "2026-07-11T18:00:00Z")
-        second_module, second_tsv = _make_elo(tmp, "qf100", "2026-07-11T22:00:00Z")
-        mc_module, mc_tsv = _make_elo(tmp, "mc", "2026-07-11T22:06:00Z")
-        sf_module, sf_tsv = _make_elo(tmp, "sf101", "2026-07-14T16:00:00Z")
-        sf102_module, sf102_tsv = _make_elo(tmp, "sf102", "2026-07-15T16:00:00Z")
+        first_module, first_tsv, first_receipt = _make_elo(
+            tmp, "qf99", "2026-07-11T18:00:00Z"
+        )
+        second_module, second_tsv, second_receipt = _make_elo(
+            tmp, "qf100", "2026-07-11T22:00:00Z"
+        )
+        mc_module, mc_tsv, mc_receipt = _make_elo(
+            tmp, "mc", "2026-07-11T22:06:00Z"
+        )
+        sf_module, sf_tsv, sf_receipt = _make_elo(
+            tmp, "sf101", "2026-07-14T16:00:00Z"
+        )
+        sf102_module, sf102_tsv, sf102_receipt = _make_elo(
+            tmp, "sf102", "2026-07-15T16:00:00Z"
+        )
 
         norway_context = tmp / "norway_context.json"
         _write_context(
@@ -236,12 +268,59 @@ def main() -> None:
             ),
         )
 
+        # Both official commands require a direct-capture receipt at the CLI
+        # boundary, before any output artifact can be created.
+        missing_receipt_artifact = tmp / "missing_receipt.final.json"
+        missing_receipt_args = _finalize_args(
+            fixture="norway-england",
+            module=first_module,
+            source_tsv=first_tsv,
+            receipt=first_receipt,
+            context=norway_context,
+            artifact=missing_receipt_artifact,
+        )
+        receipt_index = missing_receipt_args.index("--elo-receipt")
+        del missing_receipt_args[receipt_index : receipt_index + 2]
+        missing_receipt = _invoke(
+            missing_receipt_args,
+            now="2026-07-11T18:05:00Z",
+        )
+        assert missing_receipt[0] != 0
+        assert "--elo-receipt" in missing_receipt[2]
+        assert "OFFICIAL" not in missing_receipt[1]
+        assert not missing_receipt_artifact.exists()
+
+        mismatched_receipt = tmp / "mismatched_receipt.json"
+        mismatched_data = json.loads(first_receipt.read_text(encoding="ascii"))
+        mismatched_data["body_sha256"] = "0" * 64
+        mismatched_receipt.write_text(
+            json.dumps(mismatched_data, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
+        mismatched_receipt_artifact = tmp / "mismatched_receipt.final.json"
+        mismatch = _invoke(
+            _finalize_args(
+                fixture="norway-england",
+                module=first_module,
+                source_tsv=first_tsv,
+                receipt=mismatched_receipt,
+                context=norway_context,
+                artifact=mismatched_receipt_artifact,
+            ),
+            now="2026-07-11T18:05:00Z",
+        )
+        assert mismatch[0] != 0
+        assert "receipt" in mismatch[2].lower()
+        assert "OFFICIAL" not in mismatch[1]
+        assert not mismatched_receipt_artifact.exists()
+
         norway_artifact = tmp / "qf99.final.json"
         first = _invoke(
             _finalize_args(
                 fixture="norway-england",
                 module=first_module,
                 source_tsv=first_tsv,
+                receipt=first_receipt,
                 context=norway_context,
                 artifact=norway_artifact,
             ),
@@ -261,6 +340,7 @@ def main() -> None:
                 fixture="argentina-switzerland",
                 module=second_module,
                 source_tsv=second_tsv,
+                receipt=second_receipt,
                 context=argentina_context,
                 artifact=argentina_artifact,
             ),
@@ -277,12 +357,36 @@ def main() -> None:
         )
         assert artifact_data["payload"]["official"]["model_weight"] == 0.6
         assert artifact_data["payload"]["elo_provenance"]["estimates"] == []
-        assert artifact_data["payload"]["schema_version"] == 2
+        assert artifact_data["payload"]["schema_version"] == 3
         assert artifact_data["payload"]["artifact_type"] == "pre_registered_match_prediction"
         assert artifact_data["payload"]["fixture"]["stage"] == "quarterfinal"
+        elo_provenance = artifact_data["payload"]["elo_provenance"]
+        assert elo_provenance["provenance_contract"] == "direct_http_v1"
+        assert elo_provenance["capture_method"] == "direct_http_response_body"
+        assert elo_provenance["receipt_sha256"] == hashlib.sha256(
+            first_receipt.read_bytes()
+        ).hexdigest()
+        assert elo_provenance["retained_receipt_name"] == first_receipt.name
+        assert elo_provenance["body_byte_count"] == len(first_tsv.read_bytes())
+
+        missing_mc_receipt_args = _mc_args(
+            artifacts=(norway_artifact, argentina_artifact),
+            module=mc_module,
+            source_tsv=mc_tsv,
+            receipt=mc_receipt,
+        )
+        receipt_index = missing_mc_receipt_args.index("--elo-receipt")
+        del missing_mc_receipt_args[receipt_index : receipt_index + 2]
+        missing_mc_receipt = _invoke(
+            missing_mc_receipt_args,
+            now="2026-07-11T22:10:00Z",
+        )
+        assert missing_mc_receipt[0] != 0
+        assert "--elo-receipt" in missing_mc_receipt[2]
+        assert "PRE-REGISTERED ARTIFACT MC" not in missing_mc_receipt[1]
 
         # Semifinal fixtures use the same fail-closed finalization path and the
-        # generic v2 artifact identity without changing the QF-only MC contract.
+        # generic v3 artifact identity without changing the QF-only MC contract.
         france_context = tmp / "france_context.json"
         france_row = _roof_row(
             kickoff="2026-07-14T19:00:00Z",
@@ -295,12 +399,37 @@ def main() -> None:
             "France|Spain",
             france_row,
         )
+        hard_stale_module, hard_stale_tsv, hard_stale_receipt = _make_elo(
+            tmp,
+            "sf101_hard_stale",
+            "2026-07-14T15:34:59Z",
+        )
+        hard_stale_artifact = tmp / "sf_hard_stale_elo.final.json"
+        hard_stale_args = _finalize_args(
+            fixture="france-spain",
+            module=hard_stale_module,
+            source_tsv=hard_stale_tsv,
+            receipt=hard_stale_receipt,
+            context=france_context,
+            artifact=hard_stale_artifact,
+        )
+        hard_stale_args.extend(("--max-elo-age-hours", "24"))
+        hard_stale = _invoke(
+            hard_stale_args,
+            now="2026-07-14T16:05:00Z",
+        )
+        assert hard_stale[0] != 0
+        assert "stale" in hard_stale[2]
+        assert "OFFICIAL" not in hard_stale[1]
+        assert not hard_stale_artifact.exists()
+
         france_artifact = tmp / "sf101.final.json"
         semifinal = _invoke(
             _finalize_args(
                 fixture="france-spain",
                 module=sf_module,
                 source_tsv=sf_tsv,
+                receipt=sf_receipt,
                 context=france_context,
                 artifact=france_artifact,
             ),
@@ -356,6 +485,7 @@ def main() -> None:
                 fixture="england-argentina",
                 module=sf102_module,
                 source_tsv=sf102_tsv,
+                receipt=sf102_receipt,
                 context=england_context,
                 artifact=england_artifact,
             ),
@@ -402,6 +532,7 @@ def main() -> None:
                 fixture="france-spain",
                 module=sf_module,
                 source_tsv=sf_tsv,
+                receipt=sf_receipt,
                 context=missing_market_context,
                 artifact=missing_market_artifact,
             ),
@@ -422,6 +553,7 @@ def main() -> None:
                 fixture="france-spain",
                 module=sf_module,
                 source_tsv=sf_tsv,
+                receipt=sf_receipt,
                 context=invalid_roof_context,
                 artifact=invalid_roof_artifact,
             ),
@@ -442,6 +574,7 @@ def main() -> None:
                 fixture="france-spain",
                 module=sf_module,
                 source_tsv=sf_tsv,
+                receipt=sf_receipt,
                 context=wrong_roof_context,
                 artifact=wrong_roof_artifact,
             ),
@@ -462,6 +595,7 @@ def main() -> None:
                 fixture="france-spain",
                 module=sf_module,
                 source_tsv=sf_tsv,
+                receipt=sf_receipt,
                 context=invalid_advance_context,
                 artifact=invalid_advance_artifact,
             ),
@@ -472,7 +606,7 @@ def main() -> None:
         assert "OFFICIAL" not in invalid_advance[1]
         assert not invalid_advance_artifact.exists()
 
-        stale_sf_module, stale_sf_tsv = _make_elo(
+        stale_sf_module, stale_sf_tsv, stale_sf_receipt = _make_elo(
             tmp,
             "sf101_stale",
             "2026-07-13T12:00:00Z",
@@ -483,6 +617,7 @@ def main() -> None:
                 fixture="france-spain",
                 module=stale_sf_module,
                 source_tsv=stale_sf_tsv,
+                receipt=stale_sf_receipt,
                 context=france_context,
                 artifact=stale_elo_artifact,
             ),
@@ -493,7 +628,7 @@ def main() -> None:
         assert "OFFICIAL" not in stale_elo[1]
         assert not stale_elo_artifact.exists()
 
-        estimated_sf_module, estimated_sf_tsv = _make_elo(
+        estimated_sf_module, estimated_sf_tsv, estimated_sf_receipt = _make_elo(
             tmp,
             "sf101_estimated",
             "2026-07-14T16:00:00Z",
@@ -505,6 +640,7 @@ def main() -> None:
                 fixture="france-spain",
                 module=estimated_sf_module,
                 source_tsv=estimated_sf_tsv,
+                receipt=estimated_sf_receipt,
                 context=france_context,
                 artifact=estimated_elo_artifact,
             ),
@@ -520,6 +656,7 @@ def main() -> None:
                 artifacts=(france_artifact, argentina_artifact),
                 module=mc_module,
                 source_tsv=mc_tsv,
+                receipt=mc_receipt,
             ),
             now="2026-07-14T16:06:00Z",
         )
@@ -533,6 +670,7 @@ def main() -> None:
                 fixture="norway-england",
                 module=first_module,
                 source_tsv=first_tsv,
+                receipt=first_receipt,
                 context=norway_context,
                 artifact=norway_artifact,
             ),
@@ -542,12 +680,18 @@ def main() -> None:
         assert "will not be overwritten" in duplicate[2]
         assert "OFFICIAL advance" not in duplicate[1]
 
+        kickoff_module, kickoff_tsv, kickoff_receipt = _make_elo(
+            tmp,
+            "qf99_kickoff",
+            "2026-07-11T20:59:00Z",
+        )
         post_kickoff_artifact = tmp / "post_kickoff.json"
         post_kickoff = _invoke(
             _finalize_args(
                 fixture="norway-england",
-                module=first_module,
-                source_tsv=first_tsv,
+                module=kickoff_module,
+                source_tsv=kickoff_tsv,
+                receipt=kickoff_receipt,
                 context=norway_context,
                 artifact=post_kickoff_artifact,
             ),
@@ -574,6 +718,7 @@ def main() -> None:
                 fixture="norway-england",
                 module=first_module,
                 source_tsv=first_tsv,
+                receipt=first_receipt,
                 context=stale_context,
                 artifact=stale_artifact,
             ),
@@ -599,6 +744,7 @@ def main() -> None:
                 fixture="norway-england",
                 module=first_module,
                 source_tsv=first_tsv,
+                receipt=first_receipt,
                 context=future_context,
                 artifact=tmp / "future.json",
             ),
@@ -617,6 +763,7 @@ def main() -> None:
                 artifacts=(tampered, argentina_artifact),
                 module=mc_module,
                 source_tsv=mc_tsv,
+                receipt=mc_receipt,
             ),
             now="2026-07-11T22:10:00Z",
         )
@@ -636,6 +783,7 @@ def main() -> None:
                 artifacts=(norway_artifact, future_artifact),
                 module=mc_module,
                 source_tsv=mc_tsv,
+                receipt=mc_receipt,
             ),
             now="2026-07-11T22:10:00Z",
         )
@@ -643,11 +791,62 @@ def main() -> None:
         assert "generated after the MC run time" in future_mc[2]
         assert "PRE-REGISTERED ARTIFACT MC" not in future_mc[1]
 
-        # Previously published QF v1 artifacts remain valid MC inputs. The old
-        # schema did not carry a stage because it was QF-specific by definition.
+        invalid_schema_data = json.loads(norway_artifact.read_text(encoding="ascii"))
+        invalid_schema_data["payload"]["schema_version"] = True
+        invalid_schema_data["payload_sha256"] = predict_jul11._payload_sha256(
+            invalid_schema_data["payload"]
+        )
+        invalid_schema = tmp / "invalid_schema_type.json"
+        invalid_schema.write_text(json.dumps(invalid_schema_data), encoding="ascii")
+        invalid_schema_mc = _invoke(
+            _mc_args(
+                artifacts=(invalid_schema, argentina_artifact),
+                module=mc_module,
+                source_tsv=mc_tsv,
+                receipt=mc_receipt,
+            ),
+            now="2026-07-11T22:10:00Z",
+        )
+        assert invalid_schema_mc[0] != 0
+        assert "invalid schema_version type" in invalid_schema_mc[2]
+
+        # Previously published generic v2 artifacts remain valid MC inputs; the
+        # new direct-capture fields are required only on v3 artifacts.
+        direct_provenance_fields = (
+            "provenance_contract",
+            "capture_method",
+            "receipt_sha256",
+            "retained_receipt_name",
+            "body_byte_count",
+        )
+        legacy_v2_data = json.loads(norway_artifact.read_text(encoding="ascii"))
+        legacy_v2_data["payload"]["schema_version"] = 2
+        for field in direct_provenance_fields:
+            legacy_v2_data["payload"]["elo_provenance"].pop(field)
+        legacy_v2_data["payload_sha256"] = predict_jul11._payload_sha256(
+            legacy_v2_data["payload"]
+        )
+        legacy_v2 = tmp / "legacy_v2_qf99.json"
+        legacy_v2.write_text(json.dumps(legacy_v2_data), encoding="ascii")
+        legacy_v2_mc = _invoke(
+            _mc_args(
+                artifacts=(legacy_v2, argentina_artifact),
+                module=mc_module,
+                source_tsv=mc_tsv,
+                receipt=mc_receipt,
+            ),
+            now="2026-07-11T22:10:00Z",
+        )
+        assert legacy_v2_mc[0] == 0, legacy_v2_mc[2]
+        assert "PRE-REGISTERED ARTIFACT MC" in legacy_v2_mc[1]
+
+        # Previously published QF v1 artifacts remain valid too. The old schema
+        # did not carry a stage because it was QF-specific by definition.
         legacy_qf99_data = json.loads(norway_artifact.read_text(encoding="ascii"))
         legacy_qf99_data["payload"]["schema_version"] = 1
         legacy_qf99_data["payload"]["artifact_type"] = "pre_registered_qf_prediction"
+        for field in direct_provenance_fields:
+            legacy_qf99_data["payload"]["elo_provenance"].pop(field)
         del legacy_qf99_data["payload"]["fixture"]["stage"]
         del legacy_qf99_data["payload"]["market"]["odds_advance"]
         del legacy_qf99_data["payload"]["market"]["advance_margin"]
@@ -664,6 +863,7 @@ def main() -> None:
                 artifacts=(legacy_qf99, argentina_artifact),
                 module=mc_module,
                 source_tsv=mc_tsv,
+                receipt=mc_receipt,
             ),
             now="2026-07-11T22:10:00Z",
         )
@@ -688,6 +888,7 @@ def main() -> None:
                 artifacts=(forced_paths[0], forced_paths[1]),
                 module=mc_module,
                 source_tsv=mc_tsv,
+                receipt=mc_receipt,
             ),
             now="2026-07-11T22:10:00Z",
         )

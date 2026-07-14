@@ -44,6 +44,8 @@ advice, staking advice, or guaranteed predictions.
 |-- backtest_ko.py                  (knockout-stage batch, grows as games play)
 |-- predict_r32.py                  (Round-of-32 advancement table)
 |-- predict_bracket.py              (full-bracket champion / deep-run odds)
+|-- capture_elo_evidence.py         (create-only direct World.tsv capture + receipt)
+|-- fetch_elo_current.py            (receipt-verified current Elo module)
 |-- create_context_template.py
 |-- fetch_the_odds_api.py
 |-- import_context_csv.py
@@ -128,6 +130,29 @@ export ODDS_API_SPORT_KEY="..."
 
 Do not commit API keys, `.env` files, or private recorded payloads.
 
+Current Elo must come from one direct-response capture for both daily previews
+and official runs:
+
+```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260714T1605Z.tsv \
+  --receipt-out evidence/World_20260714T1605Z.receipt.json \
+  --timeout-seconds 30
+
+python3 fetch_elo_current.py \
+  --tsv evidence/World_20260714T1605Z.tsv \
+  --receipt evidence/World_20260714T1605Z.receipt.json \
+  --out elo_current_latest.py \
+  --required-team France \
+  --required-team Spain
+```
+
+The capture writes the unmodified HTTP response body and its receipt to new,
+create-only paths. Do not copy or reuse an older TSV, reconstruct or transcode
+it, or normalize its newlines. The receipt records response-completion time,
+byte count, and SHA-256. Capture failure means no Elo-based daily preview;
+official finalization additionally rejects evidence older than 30 minutes.
+
 Weather adjustments are auditable context, not model parameters. Current
 predictions must record kickoff/check/forecast issue and valid times, an
 HTTP(S) source, evidence type, evidence snapshot plus SHA-256, decision, and
@@ -143,10 +168,13 @@ evidence.
 
 Use `create_context_template.py --source sf_jul14_15 --fixture <slug>` to create
 one semifinal finalization template, then import the completed CSV with
-`--require-weather-evidence --context-only`. `predict_jul11.py finalize` writes
-a stage-labelled schema-2, hashed, create-only artifact for exactly that
-fixture; direct two-way advancement odds take precedence over the documented
-90-minute fallback. The historical `predict_jul11.py mc` path remains QF-only.
+`--require-weather-evidence --context-only`. `predict_jul11.py finalize` and
+`predict_jul11.py mc` require the matching `--elo-receipt`; finalization writes
+a stage-labelled schema-3, hashed, create-only artifact with
+`direct_http_v1` provenance for exactly that fixture. Direct two-way advancement
+odds take precedence over the documented 90-minute fallback. The historical
+`predict_jul11.py mc` path remains QF-only, and schema-1/schema-2 artifacts
+remain readable.
 See
 [AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md) for the external scheduler
 contract and finalization times.
@@ -165,6 +193,7 @@ python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
   --elo-module elo_current_latest.py \
   --elo-source-tsv evidence/World.tsv \
+  --elo-receipt evidence/World.receipt.json \
   --output-csv /tmp/paper_signals.csv \
   --append-ledger paper_bet_ledger.csv \
   --date 2026-07-05 \
@@ -172,8 +201,9 @@ python3 generate_paper_signals.py \
 ```
 
 By default, `generate_paper_signals.py` reads `elo_current_latest.py` and
-validates the exact World.tsv source, SHA-256, 24-hour freshness, required-team
-coverage, and `ESTIMATES=[]`. Any failure exits before a CSV is written.
+validates the direct-HTTP receipt, exact World.tsv source, SHA-256, 24-hour
+freshness, required-team coverage, and `ESTIMATES=[]`. Any failure exits before
+a CSV is written.
 Group-stage labels select `group_v37a`; knockout labels select
 `knockout_locked`. Use `--elo-source snapshot` only for historical replay.
 
@@ -192,6 +222,7 @@ python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
   --elo-module elo_current_latest.py \
   --elo-source-tsv evidence/World.tsv \
+  --elo-receipt evidence/World.receipt.json \
   --output-csv /tmp/paper_signals.csv \
   --date 2026-07-05 \
   --stage R16 \
