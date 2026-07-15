@@ -59,6 +59,60 @@ def _outdoor_payload(
     }
 
 
+def _nws_payload(
+    *,
+    decision: str = "none",
+    scale: float = 1.0,
+    kickoff: str = "2026-07-11T21:00:00Z",
+    checked: str = "2026-07-11T19:00:00Z",
+    issued: str = "2026-07-11T18:30:00Z",
+    generated: str = "2026-07-11T18:45:00Z",
+    period_start: str = "2026-07-11T21:00:00Z",
+    period_end: str = "2026-07-11T22:00:00Z",
+    capture_method: str = "direct_http_response_body",
+) -> dict[str, object]:
+    points_source = "https://api.weather.gov/points/25.7617,-80.1918"
+    hourly_source = "https://api.weather.gov/gridpoints/MFL/110,50/forecast/hourly"
+    points_snapshot = json.dumps(
+        {"id": points_source, "properties": {"forecastHourly": hourly_source}},
+        separators=(",", ":"),
+    )
+    hourly_snapshot = json.dumps(
+        {
+            "properties": {
+                "updateTime": issued,
+                "generatedAt": generated,
+                "periods": [
+                    {
+                        "startTime": period_start,
+                        "endTime": period_end,
+                        "temperature": 88,
+                    }
+                ],
+            }
+        },
+        separators=(",", ":"),
+    )
+    return {
+        "market_odds": [2.4, 3.2, 2.9],
+        "weather_scale": scale,
+        "kickoff_at_utc": kickoff,
+        "weather_checked_at_utc": checked,
+        "weather_forecast_issued_at_utc": issued,
+        "weather_forecast_valid_at_utc": period_start,
+        "weather_forecast_generated_at_utc": generated,
+        "weather_source": hourly_source,
+        "weather_evidence_type": "hourly",
+        "weather_evidence_snapshot": hourly_snapshot,
+        "weather_evidence_sha256": _digest(hourly_snapshot),
+        "weather_capture_method": capture_method,
+        "weather_points_source": points_source,
+        "weather_points_evidence_snapshot": points_snapshot,
+        "weather_points_evidence_sha256": _digest(points_snapshot),
+        "weather_decision": decision,
+    }
+
+
 def _write_context(path: Path, key: str, payload: dict[str, object]) -> None:
     path.write_text(
         json.dumps({"matches": {key: payload}}, ensure_ascii=False, indent=2) + "\n",
@@ -87,23 +141,20 @@ def main() -> None:
         # CSV import preserves all provenance fields. Rain at exactly T-3h is valid.
         valid_csv = tmp / "weather_evidence_valid.csv"
         valid_json = tmp / "weather_evidence_valid.json"
-        rain_snapshot = ' {"radar":"rain at kickoff","valid":"2026-07-11T21:00:00Z"}\n'
+        rain_payload = _nws_payload(
+            decision="rain_applied",
+            scale=0.95,
+            checked="2026-07-11T18:00:00Z",
+            issued="2026-07-11T17:30:00Z",
+            generated="2026-07-11T17:45:00Z",
+        )
         rain_row = {
             "home": "Norway",
             "away": "England",
             "market_home": "2.40",
             "market_draw": "3.20",
             "market_away": "2.90",
-            "weather_scale": "0.95",
-            "kickoff_at_utc": "2026-07-11T21:00:00Z",
-            "weather_checked_at_utc": "2026-07-11T18:00:00Z",
-            "weather_forecast_issued_at_utc": "2026-07-11T17:30:00Z",
-            "weather_forecast_valid_at_utc": "2026-07-11T21:30:00Z",
-            "weather_source": "https://radar.weather.gov/station/KAMX/standard",
-            "weather_evidence_type": "radar",
-            "weather_evidence_snapshot": rain_snapshot,
-            "weather_evidence_sha256": _digest(rain_snapshot),
-            "weather_decision": "rain_applied",
+            **{key: value for key, value in rain_payload.items() if key != "market_odds"},
         }
         with valid_csv.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rain_row))
@@ -123,11 +174,21 @@ def main() -> None:
         for field in (
             "weather_forecast_issued_at_utc",
             "weather_forecast_valid_at_utc",
+            "weather_forecast_generated_at_utc",
             "weather_evidence_snapshot",
             "weather_evidence_sha256",
+            "weather_capture_method",
+            "weather_points_source",
+            "weather_points_evidence_snapshot",
+            "weather_points_evidence_sha256",
         ):
             assert imported[field] == rain_row[field]
-        valid_check = _validate(valid_json, "--require-weather-evidence")
+        valid_check = _validate(
+            valid_json,
+            "--require-structured-weather",
+            "--now-utc",
+            "2026-07-11T18:00:00Z",
+        )
         assert valid_check.returncode == 0, valid_check.stdout + valid_check.stderr
         valid_pipeline_json = tmp / "weather_evidence_pipeline.json"
         valid_pipeline = _run(
@@ -139,6 +200,9 @@ def main() -> None:
                 "--output-json",
                 str(valid_pipeline_json),
                 "--require-weather-evidence",
+                "--require-structured-weather",
+                "--now-utc",
+                "2026-07-11T18:00:00Z",
                 "--context-only",
             ],
             check=False,
@@ -146,6 +210,303 @@ def main() -> None:
         assert valid_pipeline.returncode == 0, valid_pipeline.stdout + valid_pipeline.stderr
         assert "Context validation complete:" in valid_pipeline.stdout
         assert "Selected prediction profile:" not in valid_pipeline.stdout
+
+        future_cli_payload = _nws_payload(checked="2026-07-11T19:01:00Z")
+        future_cli_path = tmp / "weather_evidence_future_cli.json"
+        _write_context(future_cli_path, "Norway|England", future_cli_payload)
+        _assert_invalid(
+            future_cli_path,
+            "weather_checked_at_utc is later than run time",
+            "--require-structured-weather",
+            "--now-utc",
+            "2026-07-11T19:00:00Z",
+        )
+
+        future_pipeline_json = tmp / "weather_evidence_future_pipeline.json"
+        future_pipeline = _run(
+            [
+                sys.executable,
+                "run_context_pipeline.py",
+                "--input-csv",
+                str(valid_csv),
+                "--output-json",
+                str(future_pipeline_json),
+                "--require-structured-weather",
+                "--now-utc",
+                "2026-07-11T17:59:00Z",
+                "--context-only",
+            ],
+            check=False,
+        )
+        assert future_pipeline.returncode != 0, (
+            future_pipeline.stdout + future_pipeline.stderr
+        )
+        assert "weather_checked_at_utc is later than run time" in future_pipeline.stdout
+
+        # Schema-4 structured NWS evidence accepts both declared capture paths.
+        for capture_method in ("direct_http_response_body", "workspace_web_fetch"):
+            payload = _nws_payload(capture_method=capture_method)
+            context = MatchContext(
+                **{key: value for key, value in payload.items() if key != "market_odds"}
+            )
+            assert validate_weather_context(
+                context,
+                require_evidence=True,
+                require_structured_weather=True,
+            ) == []
+
+        invalid_method_payload = _nws_payload(capture_method="browser_summary")
+        invalid_method_context = MatchContext(
+            **{
+                key: value
+                for key, value in invalid_method_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "weather_capture_method must be one of" in issue
+            for issue in validate_weather_context(
+                invalid_method_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        mismatched_url_payload = _nws_payload()
+        mismatched_url_payload["weather_source"] = (
+            "https://api.weather.gov/gridpoints/FFC/1,1/forecast/hourly"
+        )
+        mismatched_url_context = MatchContext(
+            **{
+                key: value
+                for key, value in mismatched_url_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "must exactly match points properties.forecastHourly" in issue
+            for issue in validate_weather_context(
+                mismatched_url_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        atlanta_points_payload = _nws_payload()
+        atlanta_points_payload["weather_points_source"] = (
+            "https://api.weather.gov/points/33.755,-84.39"
+        )
+        atlanta_points_context = MatchContext(
+            **{
+                key: value
+                for key, value in atlanta_points_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "weather_points_source must exactly match weather points JSON id" in issue
+            for issue in validate_weather_context(
+                atlanta_points_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        properties_id_payload = _nws_payload()
+        points_json = json.loads(
+            properties_id_payload["weather_points_evidence_snapshot"]
+        )
+        points_json["properties"]["@id"] = properties_id_payload[
+            "weather_points_source"
+        ]
+        points_json.pop("id")
+        points_snapshot = json.dumps(points_json, separators=(",", ":"))
+        properties_id_payload["weather_points_evidence_snapshot"] = points_snapshot
+        properties_id_payload["weather_points_evidence_sha256"] = _digest(
+            points_snapshot
+        )
+        properties_id_context = MatchContext(
+            **{
+                key: value
+                for key, value in properties_id_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert validate_weather_context(
+            properties_id_context,
+            require_evidence=True,
+            require_structured_weather=True,
+        ) == []
+
+        conflicting_ids_payload = _nws_payload()
+        points_json = json.loads(
+            conflicting_ids_payload["weather_points_evidence_snapshot"]
+        )
+        points_json["properties"]["@id"] = (
+            "https://api.weather.gov/points/33.755,-84.39"
+        )
+        points_snapshot = json.dumps(points_json, separators=(",", ":"))
+        conflicting_ids_payload["weather_points_evidence_snapshot"] = points_snapshot
+        conflicting_ids_payload["weather_points_evidence_sha256"] = _digest(
+            points_snapshot
+        )
+        conflicting_ids_context = MatchContext(
+            **{
+                key: value
+                for key, value in conflicting_ids_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "weather points JSON id and properties.@id must match" in issue
+            for issue in validate_weather_context(
+                conflicting_ids_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        bad_points_hash_payload = _nws_payload()
+        bad_points_hash_payload["weather_points_evidence_sha256"] = "0" * 64
+        bad_points_hash_context = MatchContext(
+            **{
+                key: value
+                for key, value in bad_points_hash_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "weather_points_evidence_sha256 does not match" in issue
+            for issue in validate_weather_context(
+                bad_points_hash_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        stale_update_payload = _nws_payload(
+            issued="2026-07-09T18:00:00Z",
+            generated="2026-07-11T18:45:00Z",
+        )
+        stale_update_context = MatchContext(
+            **{
+                key: value
+                for key, value in stale_update_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "weather forecast issue is stale" in issue
+            for issue in validate_weather_context(
+                stale_update_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        stale_json_forged_issue_payload = _nws_payload(
+            issued="2026-07-09T18:00:00Z",
+            generated="2026-07-11T18:45:00Z",
+        )
+        stale_json_forged_issue_payload["weather_forecast_issued_at_utc"] = (
+            "2026-07-11T18:30:00Z"
+        )
+        stale_json_forged_issue_context = MatchContext(
+            **{
+                key: value
+                for key, value in stale_json_forged_issue_payload.items()
+                if key != "market_odds"
+            }
+        )
+        stale_json_forged_issues = validate_weather_context(
+            stale_json_forged_issue_context,
+            require_evidence=True,
+            require_structured_weather=True,
+        )
+        assert any(
+            "must match weather hourly properties.updateTime" in issue
+            for issue in stale_json_forged_issues
+        )
+        assert any(
+            "weather forecast issue is stale" in issue
+            for issue in stale_json_forged_issues
+        )
+
+        forged_time_payload = _nws_payload()
+        forged_time_payload["weather_forecast_issued_at_utc"] = "2026-07-11T18:31:00Z"
+        forged_time_context = MatchContext(
+            **{
+                key: value
+                for key, value in forged_time_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "must match weather hourly properties.updateTime" in issue
+            for issue in validate_weather_context(
+                forged_time_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        forged_generated_payload = _nws_payload()
+        forged_generated_payload["weather_forecast_generated_at_utc"] = (
+            "2026-07-11T18:46:00Z"
+        )
+        forged_generated_context = MatchContext(
+            **{
+                key: value
+                for key, value in forged_generated_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "must match weather hourly properties.generatedAt" in issue
+            for issue in validate_weather_context(
+                forged_generated_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        forged_valid_payload = _nws_payload()
+        forged_valid_payload["weather_forecast_valid_at_utc"] = "2026-07-11T21:01:00Z"
+        forged_valid_context = MatchContext(
+            **{
+                key: value
+                for key, value in forged_valid_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "must match the kickoff period startTime" in issue
+            for issue in validate_weather_context(
+                forged_valid_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
+
+        missing_kickoff_period_payload = _nws_payload(
+            period_start="2026-07-11T20:00:00Z",
+            period_end="2026-07-11T21:00:00Z",
+        )
+        missing_kickoff_period_context = MatchContext(
+            **{
+                key: value
+                for key, value in missing_kickoff_period_payload.items()
+                if key != "market_odds"
+            }
+        )
+        assert any(
+            "exactly one period covering kickoff" in issue
+            for issue in validate_weather_context(
+                missing_kickoff_period_context,
+                require_evidence=True,
+                require_structured_weather=True,
+            )
+        )
 
         # Heat at exactly T-6h passes, including equivalent non-UTC offsets.
         heat_payload = _outdoor_payload(
@@ -246,12 +607,43 @@ def main() -> None:
             weather_evidence_snapshot=roof_snapshot,
             weather_evidence_sha256=_digest(roof_snapshot),
             weather_decision="indoor_no_weather",
+            weather_capture_method="workspace_web_fetch",
         )
         assert validate_weather_context(
             roof,
             require_evidence=True,
             expected_fixture_id="2026-QF99-Norway-England",
+            require_structured_weather=True,
         ) == []
+        roof_with_forecast_metadata = MatchContext(
+            **{
+                **roof.__dict__,
+                "weather_forecast_issued_at_utc": "2026-07-11T18:30:00Z",
+                "weather_forecast_valid_at_utc": "2026-07-11T21:00:00Z",
+                "weather_forecast_generated_at_utc": "2026-07-11T18:45:00Z",
+            }
+        )
+        assert validate_weather_context(
+            roof_with_forecast_metadata,
+            require_evidence=True,
+            expected_fixture_id="2026-QF99-Norway-England",
+            require_structured_weather=True,
+        ) == []
+        nws_points_roof_fields = {
+            "weather_points_source": "https://api.weather.gov/points/25.7617,-80.1918",
+            "weather_points_evidence_snapshot": "{}",
+            "weather_points_evidence_sha256": _digest("{}"),
+        }
+        for field, value in nws_points_roof_fields.items():
+            mixed_roof = MatchContext(**{**roof.__dict__, field: value})
+            assert f"official_roof evidence cannot include {field}" in (
+                validate_weather_context(
+                    mixed_roof,
+                    require_evidence=True,
+                    expected_fixture_id="2026-QF99-Norway-England",
+                    require_structured_weather=True,
+                )
+            )
         invalid_roof = MatchContext(
             **{
                 **roof.__dict__,
@@ -353,8 +745,13 @@ def main() -> None:
         for field in (
             "weather_forecast_issued_at_utc",
             "weather_forecast_valid_at_utc",
+            "weather_forecast_generated_at_utc",
             "weather_evidence_snapshot",
             "weather_evidence_sha256",
+            "weather_capture_method",
+            "weather_points_source",
+            "weather_points_evidence_snapshot",
+            "weather_points_evidence_sha256",
         ):
             assert field in template_rows["Norway|England"]
             assert template_rows["Norway|England"][field] == ""
@@ -449,6 +846,8 @@ def main() -> None:
                 "qf_jul11",
                 "--output-json",
                 str(pipeline_output),
+                "--now-utc",
+                "2026-07-11T18:00:00Z",
             ],
             check=False,
         )
@@ -467,6 +866,8 @@ def main() -> None:
                 "england-argentina",
                 "--output-json",
                 str(sf_pipeline_output),
+                "--now-utc",
+                "2026-07-15T16:05:00Z",
             ],
             check=False,
         )

@@ -14,8 +14,11 @@ Run: ``python3 build_skill.py``
 """
 from __future__ import annotations
 
+import csv
+import json
 import shutil
 import stat
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -92,6 +95,126 @@ ROOT_PY = [
 ]
 
 
+def _safe_evidence_file(relative: Path, *, line: int, label: str) -> Path:
+    """Validate one manifest path without following links outside evidence/."""
+
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or relative.parts[0] != "evidence"
+        or ".." in relative.parts
+    ):
+        raise SystemExit(
+            f"ensemble ledger line {line}: {label} must be under repository evidence/"
+        )
+
+    candidate = REPO / relative
+    current = REPO
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise SystemExit(
+                f"ensemble ledger line {line}: {label} cannot use symlinks: {relative}"
+            )
+
+    try:
+        evidence_root = (REPO / "evidence").resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise SystemExit(
+            f"ensemble ledger line {line}: missing {label} {relative}"
+        ) from exc
+    if evidence_root != resolved and evidence_root not in resolved.parents:
+        raise SystemExit(
+            f"ensemble ledger line {line}: {label} escapes repository evidence/: "
+            f"{relative}"
+        )
+    if not resolved.is_file():
+        raise SystemExit(
+            f"ensemble ledger line {line}: missing {label} {relative}"
+        )
+    return relative
+
+
+def _require_tracked_evidence(files: set[Path]) -> None:
+    """Reject local-only evidence when building from a real Git worktree."""
+
+    git_marker = REPO / ".git"
+    if not git_marker.exists():
+        return
+    for relative in sorted(files):
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(REPO),
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                relative.as_posix(),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise SystemExit(
+                "ensemble evidence dependency must be git-tracked for release: "
+                f"{relative}"
+            )
+
+
+def _ensemble_evidence_files() -> tuple[Path, ...]:
+    """Return governed live-ledger evidence that must travel with the bundle."""
+
+    ledger = REPO / "ensemble_ledger.csv"
+    if not ledger.exists():
+        return ()
+    with ledger.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    files: set[Path] = set()
+    for line, row in enumerate(rows, 2):
+        raw = str(row.get("pre_match_evidence") or "").strip()
+        if str(row.get("basis") or "").strip() != "live_current_elo":
+            if raw:
+                raise SystemExit(
+                    f"ensemble ledger line {line}: pre_match_evidence is only valid "
+                    "for basis=live_current_elo"
+                )
+            continue
+        if not raw:
+            continue
+        relative = Path(raw)
+        _safe_evidence_file(relative, line=line, label="pre_match_evidence")
+        artifact = REPO / relative
+        files.add(relative)
+        try:
+            envelope = json.loads(artifact.read_text(encoding="ascii"))
+            elo = envelope["payload"]["elo_provenance"]
+            retained = (
+                elo["retained_tsv_name"],
+                elo["retained_receipt_name"],
+            )
+        except (KeyError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SystemExit(
+                f"ensemble ledger line {line}: invalid pre_match_evidence envelope: {exc}"
+            ) from exc
+        for name in retained:
+            if not isinstance(name, str) or not name or Path(name).name != name:
+                raise SystemExit(
+                    f"ensemble ledger line {line}: invalid retained Elo file name"
+                )
+            retained_relative = relative.parent / name
+            _safe_evidence_file(
+                retained_relative,
+                line=line,
+                label="retained Elo evidence",
+            )
+            files.add(retained_relative)
+    _require_tracked_evidence(files)
+    return tuple(sorted(files))
+
+
 def _is_cache(path: Path) -> bool:
     return "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}
 
@@ -124,6 +247,15 @@ def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
         if not src.exists():
             raise SystemExit(f"manifest error: missing root file {name}")
         dst = stage / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+    # Ledger rows admitted under the pre-match provenance policy must remain
+    # verifiable after installation, so copy only their referenced artifacts
+    # and Elo response/receipt pairs.
+    for relative in _ensemble_evidence_files():
+        src = REPO / relative
+        dst = stage / relative
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 

@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.9 bundle (KO n=28 monitoring complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen)
+# Football Odds Model — v3.9 bundle (KO n=29; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -84,10 +84,19 @@ description: >-
 >   current-Elo 50:50 ensemble 0.1834. The CSV `p_ensemble` column contains one
 >   `mixed_legacy` row from the stale-Elo/current-Elo transition. A refit must
 >   use only unique, settled `live_current_elo` rows and waits for eligible
->   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. At n=28 the
->   ledger has 10 eligible rows out of 12 total: **HOLD_W_0_6**. The two July 11
+>   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. At current
+>   n=29 the ledger has 11 eligible rows out of 13 total: **HOLD_W_0_6**. The two July 11
 >   QF preview rows remain eligible because `basis` records pre-match Elo input
 >   quality, not the existence of an official finalization artifact.
+>   The 11 live fixtures through France-Spain are explicitly grandfathered;
+>   every later or otherwise new `live_current_elo` fixture requires a
+>   repository-relative `pre_match_evidence` file under `evidence/`. This may be a valid official
+>   artifact or a sealed `ensemble_pre_match_freeze`; it must bind pre-kickoff
+>   direct-Elo bytes/receipt, model and market probabilities, selected market
+>   odds and de-margin method, and weather/lineup basis. Post-match capture or
+>   reconstructed probabilities fail closed and cannot trigger the n=12 grid.
+>   The evidence hash must also appear in a trusted pre-kickoff scheduler,
+>   Git, or WORM anchor; a self-reported timestamp is not proof of creation.
 >   Grid-fit optimum was w=1.0, but
 >   3 of 8 games are market-wrong-side low-frequency events — half-step to 0.6.
 > - **graded-k HELD.** At n=28, graded-minus-flat-1.00 Brier is +0.0036 with
@@ -381,11 +390,11 @@ Run from the skill directory (numpy needed only for the Monte Carlo;
   --elo-module <elo.py> --elo-source-tsv <World.tsv> --elo-receipt
   <receipt.json> --context-file <context.json> --artifact-out <final.json>`
   finalizes exactly one pre-kickoff knockout match into a create-only hashed
-  schema-3 `pre_registered_match_prediction` artifact with its direct-HTTP
+  schema-4 `pre_registered_match_prediction` artifact with its direct-HTTP
   receipt and stage recorded, using frozen w=0.6 model / 0.4 market. A direct
   two-way advancement market is preferred; otherwise the artifact explicitly
   marks the 90-minute-market fallback. The reader remains compatible with
-  historical schema-1 and schema-2 artifacts.
+  historical schema-1, schema-2, and schema-3 artifacts.
 - `python predict_jul11.py mc --artifacts <qf99.json> <qf100.json> --elo-module
   <elo.py> --elo-source-tsv <World.tsv> --elo-receipt <receipt.json>
   --qf98-winner {Spain,Belgium}` consumes the stored QF probabilities without
@@ -473,7 +482,7 @@ June-26 result update path:
    Use `--source jun26` for the June 26 slate or `--source sf_jul14_15` for the
    semifinals. Semifinal templates also accept optional direct two-way
    `market_advance_odds`; their de-margin method is the row's `market_method`.
-   Official schema-3 artifacts retain direct-HTTP receipt provenance and signed
+   Official schema-4 artifacts retain direct-HTTP receipt provenance and signed
    model-minus-market gaps, and set a
    review flag at 4 points; the flag prompts investigation and never changes
    frozen parameters automatically.
@@ -499,6 +508,20 @@ compatibility. Example:
 Weather provenance is mandatory for current predictions, including no-adjustment
 outdoor decisions. Historical replay may load legacy rows, but any asserted
 weather override must still pass `validate_weather_context`.
+Outdoor `api.weather.gov` evidence must retain both the points response and the
+hourly response at its exact `properties.forecastHourly` URL, with matching
+source fields, snapshots, and SHA-256 values. The points response `id` (or
+`properties.@id`) must equal the declared points URL. Record
+`weather_capture_method` as `direct_http_response_body` or
+`workspace_web_fetch`; the latter is an auditable tool-text snapshot, not raw
+or byte-identical HTTP response bytes.
+Use hourly `properties.updateTime` as the sole issuance timestamp, record
+`generatedAt` separately as `weather_forecast_generated_at_utc`, and require a
+real period satisfying `startTime <= kickoff < endTime`. Caller-supplied
+issue/valid timestamps must match the retained JSON; any mismatch fails closed.
+This schema verifies provenance and period coverage; it does not infer a
+`heat_*` or `rain_*` decision from the forecast values or change the frozen
+weather adjustment mapping.
 Current Elo provenance is likewise mandatory for daily and official runs: use
 the create-only direct-response capture and its receipt, never a copied or
 reconstructed TSV. Unverified legacy input is replay-only and cannot enter an

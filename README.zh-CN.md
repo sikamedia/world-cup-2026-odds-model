@@ -154,18 +154,35 @@ python3 fetch_elo_current.py \
 小时；`rain_applied` 只接受 3 小时内的 hourly/radar 证据。缺失或过期证据是
 阻断错误，不再只是 warning。
 
+室外 `api.weather.gov` 证据必须同时保留 points 响应，以及从其精确
+`properties.forecastHourly` URL 跟随取得的 hourly 响应。points 响应的 `id`
+（或 `properties.@id`）必须与声明的 points URL 一致。记录
+`weather_capture_method=direct_http_response_body|workspace_web_fetch`，并记录
+`weather_points_source`、`weather_points_evidence_snapshot` 和
+`weather_points_evidence_sha256`。只有 hourly `properties.updateTime` 可作为预报
+签发时间；`generatedAt` 必须单独写入 `weather_forecast_generated_at_utc`。hourly
+period 中必须存在 `startTime <= kickoff < endTime` 的真实时段。
+`workspace_web_fetch` 只代表可审计的工具文本快照，不代表原始 HTTP 响应字节或
+字节级同一性。
+schema 4 只验证该 provenance 链和开球时段覆盖，不会从预报数值自动推导
+`heat_*` 或 `rain_*` 决策，也不会改变冻结的天气调整映射。
+
 `indoor_no_weather` 只接受开球前 6 小时内核查的官方、对应场次的顶棚证据，且
 必须记录 `roof_status=closed` 和所选场次精确的
 `weather_evidence_fixture_id`。场馆有可开合顶棚本身不构成室内证据。
 
 半决赛使用 `create_context_template.py --source sf_jul14_15 --fixture <slug>`
-分别生成单场模板，填入证据后以 `--require-weather-evidence --context-only`
+分别生成单场模板，填入证据后以
+`--require-weather-evidence --require-structured-weather --context-only`
 导入验证。`predict_jul11.py finalize` 和 `predict_jul11.py mc` 均须传入匹配的
-`--elo-receipt`；finalization 为该场写出带 stage、schema-3、
+`--elo-receipt`；finalization 为该场写出带 stage、schema-4、
 `direct_http_v1` provenance、规范化哈希且不可覆盖的终版 artifact。直接两路
 晋级盘优先，否则明确使用 90 分钟盘口 fallback。历史 `predict_jul11.py mc`
-路径仍只接受两场 QF artifact，schema-1/schema-2 历史 artifact 仍可读取。外部任务
-正文与终版运行时点见
+路径仍只接受两场 QF artifact，schema-1/schema-2/schema-3 历史 artifact 仍可读取。
+France-Spain 及以前的 11 个 `live_current_elo` 场次被明确 grandfather；任何新场次
+只有在 `pre_match_evidence` 指向 `evidence/` 下已验证的官方 artifact 或密封赛前 freeze 时才计数。
+该证据必须绑定新鲜 direct-Elo 字节/receipt 与冻结的模型、市场概率；赛后重建一律拒绝。
+外部任务正文与终版运行时点见
 [AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md)。
 淘汰赛冻结、风格 cohort、点球和主场口径见
 [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md)。

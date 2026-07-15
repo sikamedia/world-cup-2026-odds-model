@@ -21,18 +21,46 @@ here and in the next generated report.
   excluded. The grid is a review output, not an automatic production refit.
 - Ensemble probabilities and `advanced_reference` are defined against
   `reference_side` (`H` or `A`). Readers continue to accept the legacy ledger
-  field names `fav_side` and `advanced_fav`; the existing ledger header is not
-  rewritten. When both new and legacy fields are populated, they must agree.
+  field names `fav_side` and `advanced_fav`. When both new and legacy fields
+  are populated, they must agree.
+- The 11 live rows through France-Spain are the explicit pre-policy
+  grandfather set. Every other `live_current_elo` fixture, and all fixtures
+  dated 2026-07-15 or later, must name a repository-relative
+  `pre_match_evidence` file under `evidence/`. The reader validates that file
+  before counting the row and requires its fixture identity and kickoff to
+  match the canonical fixture registry and ledger date. It may be a valid
+  official pre-match artifact or a sealed `ensemble_pre_match_freeze` record;
+  an official artifact is not required for admission.
+- A freeze record must predate kickoff, declare that no live match state was
+  used, bind the row's `reference_side` and three probabilities, retain a
+  direct-HTTP World.tsv/receipt pair no more than 30 minutes old, contain
+  non-estimated participant ratings matching those bytes, and retain the
+  selected market odds/source/capture time/de-margin and advancement methods.
+  It also records the model, weather, and lineup basis. The market probability
+  is recomputed from the retained odds and the ensemble probability must equal
+  frozen `w=0.6`. Missing, stale, mismatched, post-kickoff, or post-result
+  reconstructed evidence fails closed and cannot open the n=12 grid.
+- A sealed payload hash proves internal integrity, not when the file first
+  existed. Before grading, compare that hash with a trusted scheduler log or a
+  pre-kickoff Git/WORM anchor. Without that external timing anchor, do not add
+  the row; code cannot distinguish a genuinely pre-match freeze from a
+  post-result file whose timestamps and hashes were all regenerated together.
 - `basis` records the Elo input basis; it does not certify that an official
   finalization artifact exists. The two July 11 QF preview rows remain eligible
   because they were frozen pre-match with current Elo and market inputs. Their
   missing official artifacts are disclosed in notes and are not grounds for a
   post-result cohort change.
-- New official schema-3 artifacts record direct-HTTP Elo receipt provenance and
-  model-minus-market 90-minute and advancement gaps. Historical schema-2
-  artifacts remain readable. An absolute gap of at least 4 points sets a review
-  flag for missing information; it does not authorize a parameter adjustment
-  during the tournament freeze.
+- New official schema-4 artifacts record direct-HTTP Elo receipt provenance,
+  structured weather provenance, and model-minus-market 90-minute and
+  advancement gaps. Historical schema-1, schema-2, and schema-3 artifacts
+  remain readable. An absolute gap of at least 4 points sets a review flag for
+  missing information; it does not authorize a parameter adjustment during the
+  tournament freeze.
+- Weather schema 4 validates source identity, retained snapshots, hashes,
+  timestamps, and the kickoff-covering period. It does not infer a heat or rain
+  decision from forecast values. Those decisions continue to use the frozen
+  analyst policy and must cite the retained kickoff period; schema adoption does
+  not introduce a new weather threshold or model parameter.
 
 ## 90-minute style cohort
 

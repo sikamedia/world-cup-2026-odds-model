@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import io
 import json
@@ -106,12 +106,36 @@ def _weather_row(
     scale: float,
     advance_odds: tuple[float, float] | None = None,
 ) -> dict:
-    snapshot = f"hourly forecast {kickoff} {decision}"
     issued = predict_jul11._parse_utc(checked)  # normalize test fixtures through runner parser
     issued_text = (
         issued.replace(minute=max(0, issued.minute - 1))
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
+    )
+    generated_text = issued.isoformat(timespec="seconds").replace("+00:00", "Z")
+    period_start = predict_jul11._parse_utc(kickoff)
+    period_end = period_start + timedelta(hours=1)
+    period_end_text = period_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+    points_source = "https://api.weather.gov/points/25.7617,-80.1918"
+    hourly_source = "https://api.weather.gov/gridpoints/MFL/110,50/forecast/hourly"
+    points_snapshot = json.dumps(
+        {"id": points_source, "properties": {"forecastHourly": hourly_source}},
+        separators=(",", ":"),
+    )
+    snapshot = json.dumps(
+        {
+            "properties": {
+                "updateTime": issued_text,
+                "generatedAt": generated_text,
+                "periods": [
+                    {
+                        "startTime": kickoff,
+                        "endTime": period_end_text,
+                    }
+                ],
+            }
+        },
+        separators=(",", ":"),
     )
     return {
         "market_odds": [2.8, 3.2, 2.5],
@@ -122,11 +146,18 @@ def _weather_row(
         "weather_checked_at_utc": checked,
         "weather_forecast_issued_at_utc": issued_text,
         "weather_forecast_valid_at_utc": kickoff,
-        "weather_source": "https://weather.example/hourly",
+        "weather_forecast_generated_at_utc": generated_text,
+        "weather_source": hourly_source,
         "weather_evidence_type": "hourly",
         "weather_decision": decision,
         "weather_evidence_snapshot": snapshot,
         "weather_evidence_sha256": hashlib.sha256(snapshot.encode("utf-8")).hexdigest(),
+        "weather_capture_method": "direct_http_response_body",
+        "weather_points_source": points_source,
+        "weather_points_evidence_snapshot": points_snapshot,
+        "weather_points_evidence_sha256": hashlib.sha256(
+            points_snapshot.encode("utf-8")
+        ).hexdigest(),
         "source_key": "synthetic-market-source",
     }
 
@@ -153,6 +184,7 @@ def _roof_row(
         "weather_decision": "indoor_no_weather",
         "weather_evidence_snapshot": snapshot,
         "weather_evidence_sha256": hashlib.sha256(snapshot.encode("utf-8")).hexdigest(),
+        "weather_capture_method": "workspace_web_fetch",
         "source_key": "synthetic-market-source",
     }
 
@@ -357,7 +389,7 @@ def main() -> None:
         )
         assert artifact_data["payload"]["official"]["model_weight"] == 0.6
         assert artifact_data["payload"]["elo_provenance"]["estimates"] == []
-        assert artifact_data["payload"]["schema_version"] == 3
+        assert artifact_data["payload"]["schema_version"] == 4
         assert artifact_data["payload"]["artifact_type"] == "pre_registered_match_prediction"
         assert artifact_data["payload"]["fixture"]["stage"] == "quarterfinal"
         elo_provenance = artifact_data["payload"]["elo_provenance"]
@@ -368,6 +400,14 @@ def main() -> None:
         ).hexdigest()
         assert elo_provenance["retained_receipt_name"] == first_receipt.name
         assert elo_provenance["body_byte_count"] == len(first_tsv.read_bytes())
+        weather_provenance = artifact_data["payload"]["context"]["weather"]
+        assert weather_provenance["capture_method"] == "direct_http_response_body"
+        assert weather_provenance["points_source"].startswith(
+            "https://api.weather.gov/points/"
+        )
+        assert weather_provenance["forecast_generated_at_utc"] == (
+            "2026-07-11T18:05:00Z"
+        )
 
         missing_mc_receipt_args = _mc_args(
             artifacts=(norway_artifact, argentina_artifact),
@@ -386,7 +426,7 @@ def main() -> None:
         assert "PRE-REGISTERED ARTIFACT MC" not in missing_mc_receipt[1]
 
         # Semifinal fixtures use the same fail-closed finalization path and the
-        # generic v3 artifact identity without changing the QF-only MC contract.
+        # generic v4 artifact identity without changing the QF-only MC contract.
         france_context = tmp / "france_context.json"
         france_row = _roof_row(
             kickoff="2026-07-14T19:00:00Z",
@@ -771,6 +811,27 @@ def main() -> None:
         assert "artifact hash mismatch" in rejected_mc[2]
         assert "PRE-REGISTERED ARTIFACT MC" not in rejected_mc[1]
 
+        # Re-sealing cannot make an advancement probability that violates the
+        # frozen 0.6/0.4 blend valid.
+        inconsistent_data = json.loads(norway_artifact.read_text(encoding="ascii"))
+        inconsistent_data["payload"]["official"]["advance_home"] = 0.0
+        inconsistent_data["payload_sha256"] = predict_jul11._payload_sha256(
+            inconsistent_data["payload"]
+        )
+        inconsistent = tmp / "inconsistent_blend.json"
+        inconsistent.write_text(json.dumps(inconsistent_data), encoding="ascii")
+        rejected_blend = _invoke(
+            _mc_args(
+                artifacts=(inconsistent, argentina_artifact),
+                module=mc_module,
+                source_tsv=mc_tsv,
+                receipt=mc_receipt,
+            ),
+            now="2026-07-11T22:10:00Z",
+        )
+        assert rejected_blend[0] != 0
+        assert "does not match frozen w=0.6 ensemble" in rejected_blend[2]
+
         future_artifact_data = json.loads(argentina_artifact.read_text(encoding="ascii"))
         future_artifact_data["payload"]["generated_at_utc"] = "2026-07-11T22:11:00Z"
         future_artifact_data["payload_sha256"] = predict_jul11._payload_sha256(
@@ -810,8 +871,92 @@ def main() -> None:
         assert invalid_schema_mc[0] != 0
         assert "invalid schema_version type" in invalid_schema_mc[2]
 
+        # Schema 4 readers require the complete sealed weather key set before
+        # coercion can supply any MatchContext defaults.
+        for missing_key in (
+            "decision",
+            "capture_method",
+            "source",
+            "evidence_snapshot",
+            "evidence_sha256",
+        ):
+            missing_weather_data = json.loads(
+                norway_artifact.read_text(encoding="ascii")
+            )
+            del missing_weather_data["payload"]["context"]["weather"][missing_key]
+            missing_weather_data["payload_sha256"] = predict_jul11._payload_sha256(
+                missing_weather_data["payload"]
+            )
+            missing_weather = tmp / f"missing_weather_{missing_key}.json"
+            missing_weather.write_text(
+                json.dumps(missing_weather_data),
+                encoding="ascii",
+            )
+            missing_weather_mc = _invoke(
+                _mc_args(
+                    artifacts=(missing_weather, argentina_artifact),
+                    module=mc_module,
+                    source_tsv=mc_tsv,
+                    receipt=mc_receipt,
+                ),
+                now="2026-07-11T22:10:00Z",
+            )
+            assert missing_weather_mc[0] != 0
+            assert "missing required schema-4 weather provenance keys" in (
+                missing_weather_mc[2]
+            )
+
+        # Previously published v3 artifacts remain readable and retain their
+        # direct-Elo provenance requirement; schema 4 weather fields are not
+        # applied retroactively.
+        schema4_weather_fields = (
+            "capture_method",
+            "points_source",
+            "points_evidence_snapshot",
+            "points_evidence_sha256",
+            "forecast_generated_at_utc",
+        )
+        legacy_v3_data = json.loads(norway_artifact.read_text(encoding="ascii"))
+        legacy_v3_data["payload"]["schema_version"] = 3
+        for field in schema4_weather_fields:
+            legacy_v3_data["payload"]["context"]["weather"].pop(field)
+        legacy_v3_data["payload_sha256"] = predict_jul11._payload_sha256(
+            legacy_v3_data["payload"]
+        )
+        legacy_v3 = tmp / "legacy_v3_qf99.json"
+        legacy_v3.write_text(json.dumps(legacy_v3_data), encoding="ascii")
+        legacy_v3_mc = _invoke(
+            _mc_args(
+                artifacts=(legacy_v3, argentina_artifact),
+                module=mc_module,
+                source_tsv=mc_tsv,
+                receipt=mc_receipt,
+            ),
+            now="2026-07-11T22:10:00Z",
+        )
+        assert legacy_v3_mc[0] == 0, legacy_v3_mc[2]
+
+        invalid_v3_data = json.loads(legacy_v3.read_text(encoding="ascii"))
+        del invalid_v3_data["payload"]["elo_provenance"]["receipt_sha256"]
+        invalid_v3_data["payload_sha256"] = predict_jul11._payload_sha256(
+            invalid_v3_data["payload"]
+        )
+        invalid_v3 = tmp / "invalid_v3_qf99.json"
+        invalid_v3.write_text(json.dumps(invalid_v3_data), encoding="ascii")
+        invalid_v3_mc = _invoke(
+            _mc_args(
+                artifacts=(invalid_v3, argentina_artifact),
+                module=mc_module,
+                source_tsv=mc_tsv,
+                receipt=mc_receipt,
+            ),
+            now="2026-07-11T22:10:00Z",
+        )
+        assert invalid_v3_mc[0] != 0
+        assert "invalid Elo receipt SHA-256" in invalid_v3_mc[2]
+
         # Previously published generic v2 artifacts remain valid MC inputs; the
-        # new direct-capture fields are required only on v3 artifacts.
+        # direct-capture fields are required only on v3+ artifacts.
         direct_provenance_fields = (
             "provenance_contract",
             "capture_method",
@@ -878,6 +1023,8 @@ def main() -> None:
             (argentina_artifact, "forced_qf100.json"),
         ):
             data = json.loads(source.read_text(encoding="ascii"))
+            data["payload"]["model"]["advance_home"] = 1.0
+            data["payload"]["market"]["advance_home"] = 1.0
             data["payload"]["official"]["advance_home"] = 1.0
             data["payload_sha256"] = predict_jul11._payload_sha256(data["payload"])
             forced = tmp / name

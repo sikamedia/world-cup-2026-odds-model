@@ -1,4 +1,4 @@
-date,stage,home,away,fav_side,p_model_currelo,p_market,p_ensemble,advanced_fav,brier_model,brier_market,brier_ensemble,basis,notes
+date,stage,home,away,reference_side,p_model_currelo,p_market,p_ensemble,advanced_reference,brier_model,brier_market,brier_ensemble,basis,notes,pre_match_evidence
 2026-07-04,R16,Canada,Morocco,A,0.642,0.688,0.591,1,0.128,0.097,0.167,mixed_legacy,"model prob = current-Elo counterfactual (stored-Elo live call was CAN 50.5%); p_ensemble came from the stale-Elo live call; market = de-margined advance; sources: 7/5 report sec 三"
 2026-07-04,R16,Paraguay,France,A,0.827,0.889,0.858,1,0.030,0.012,0.020,current_elo_counterfactual,"current-Elo rerun 7/4 PM (live report used stored-Elo 85.6%); brier_model on 0.827"
 2026-07-05,R16,Brazil,Norway,H,0.599,0.665,0.632,0,0.359,0.442,0.399,live_current_elo,"model B (current Elo, heat+rain, Ryerson reinstated); market avg FanDuel/-118 book; FIRST regulation upset of tournament — model beat market on Brier for the first time"
