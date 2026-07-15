@@ -211,15 +211,22 @@ def build_draw_floor_metric_rows(games=KO_RESULTS):
     return rows
 
 
-def structured_governance_summaries(root=Path(ROOT)):
-    """Load the small append-only ledgers used by the review output and tests."""
+def structured_governance_summaries(
+    root=Path(ROOT),
+    *,
+    trusted_anchor_resolver=None,
+):
+    """Load review ledgers, default-denying externally unanchored freezes."""
     style = evaluate_style_cohort(
         load_style_observations(root / "style_divergence_ledger.csv"))
     shootout = summarize_shootouts(
         load_shootout_ledger(root / "shootout_ledger.csv"))
     home = summarize_home_advantage(
         load_home_advantage_ledger(root / "home_advantage_ledger.csv"))
-    ensemble = summarize_ensemble_basis(root / "ensemble_ledger.csv")
+    ensemble = summarize_ensemble_basis(
+        root / "ensemble_ledger.csv",
+        trusted_anchor_resolver=trusted_anchor_resolver,
+    )
     return style, shootout, home, ensemble
 
 
@@ -336,9 +343,9 @@ def main():
     print(f"  {'k':>5}{'Brier':>9}{'logLoss':>9}{'expUps':>9}   (actual ups {act_ups})")
     briers = {}
     for k in ks:
-        b, l, e = adv_metrics(records, k)
+        b, log_loss, e = adv_metrics(records, k)
         briers[k] = b
-        print(f"  {k:>5.2f}{b:>9.4f}{l:>9.4f}{e:>9.2f}")
+        print(f"  {k:>5.2f}{b:>9.4f}{log_loss:>9.4f}{e:>9.2f}")
     best_k = min(briers, key=briers.get)
     e70 = adv_metrics(records, 0.70)[2]
 

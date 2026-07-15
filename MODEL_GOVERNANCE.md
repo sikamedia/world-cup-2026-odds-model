@@ -36,27 +36,38 @@ here and in the next generated report.
   direct-HTTP World.tsv/receipt pair no more than 30 minutes old, contain
   non-estimated participant ratings matching those bytes, and retain the
   selected market odds/source/capture time/de-margin and advancement methods.
-  It also records the model, weather, and lineup basis. The market probability
-  is recomputed from the retained odds and the ensemble probability must equal
-  frozen `w=0.6`. Missing, stale, mismatched, post-kickoff, or post-result
-  reconstructed evidence fails closed and cannot open the n=12 grid.
+  Its exact model basis is `predict_jul11._predict/v1`, the frozen knockout
+  profile and parameter set (including `style_threshold=266`); its exact context
+  basis contains only the weather decision/scale and home/away lineup scales.
+  The reader replays that model from the retained ratings, checks the probability
+  for `reference_side`, recomputes the market probability (including the replayed
+  draw split for `derived_from_90`), and requires the blend to equal frozen
+  `w=0.6`. Missing, stale, mismatched, ignored extra context, post-kickoff, or
+  post-result reconstructed evidence fails closed and cannot open the n=12 grid.
 - A sealed payload hash proves internal integrity, not when the file first
-  existed. Before grading, compare that hash with a trusted scheduler log or a
-  pre-kickoff Git/WORM anchor. Without that external timing anchor, do not add
-  the row; code cannot distinguish a genuinely pre-match freeze from a
-  post-result file whose timestamps and hashes were all regenerated together.
+  existed. `summarize_ensemble_basis()` therefore defaults to rejecting every
+  freeze unless its caller supplies an external `trusted_anchor_resolver`. The
+  resolver must return a `TrustedTimingAnchor` whose source and anchor ID match
+  the freeze reference, whose digest matches the sealed payload, and whose
+  observation satisfies `frozen_at <= observed_at < kickoff`. The resolver must
+  read a trusted scheduler/Git/WORM system, never derive trust from the local
+  freeze. Valid official artifacts do not require this freeze-only resolver.
 - `basis` records the Elo input basis; it does not certify that an official
   finalization artifact exists. The two July 11 QF preview rows remain eligible
   because they were frozen pre-match with current Elo and market inputs. Their
   missing official artifacts are disclosed in notes and are not grounds for a
   post-result cohort change.
-- New official schema-4 artifacts record direct-HTTP Elo receipt provenance,
-  structured weather provenance, and model-minus-market 90-minute and
-  advancement gaps. Historical schema-1, schema-2, and schema-3 artifacts
-  remain readable. An absolute gap of at least 4 points sets a review flag for
-  missing information; it does not authorize a parameter adjustment during the
-  tournament freeze.
-- Weather schema 4 validates source identity, retained snapshots, hashes,
+- QF and semifinal finalization remains on schema 3, including any compliant
+  SF102 retry before kickoff. Schema 4 activates only for `third_place` and
+  `final` artifacts, where it records structured weather provenance in addition
+  to direct-HTTP Elo receipt provenance and signed model-minus-market gaps.
+  Register those operational fixtures only after SF102 settles and the real
+  participants are known; synthetic participants belong in tests only.
+  Readers remain compatible with schemas 1-4 and reject a stage/schema mismatch.
+  An absolute gap of at least 4 points sets a review flag for missing information;
+  it does not authorize a parameter adjustment during the tournament freeze.
+- For third-place/final artifacts, weather schema 4 validates source identity,
+  exact canonical capture-method values, retained snapshots, hashes,
   timestamps, and the kickoff-covering period. It does not infer a heat or rain
   decision from forecast values. Those decisions continue to use the frozen
   analyst policy and must cite the retained kickoff period; schema adoption does

@@ -12,7 +12,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from match_context import MatchContext, validate_weather_context
+from match_context import (
+    MatchContext,
+    coerce_context_payload,
+    validate_weather_context,
+)
 from model_stability import STABLE_V35, predict_match
 
 
@@ -246,6 +250,10 @@ def main() -> None:
         # Schema-4 structured NWS evidence accepts both declared capture paths.
         for capture_method in ("direct_http_response_body", "workspace_web_fetch"):
             payload = _nws_payload(capture_method=capture_method)
+            assert (
+                coerce_context_payload(payload).weather_capture_method
+                == capture_method
+            )
             context = MatchContext(
                 **{key: value for key, value in payload.items() if key != "market_odds"}
             )
@@ -254,6 +262,46 @@ def main() -> None:
                 require_evidence=True,
                 require_structured_weather=True,
             ) == []
+
+        for invalid_method in (
+            "WORKSPACE_WEB_FETCH",
+            "workspace-web-fetch",
+            " workspace_web_fetch",
+        ):
+            try:
+                coerce_context_payload(
+                    _nws_payload(capture_method=invalid_method)
+                )
+            except ValueError as exc:
+                assert "weather_capture_method must be one of" in str(exc)
+            else:
+                raise AssertionError(
+                    f"noncanonical capture method accepted: {invalid_method!r}"
+                )
+
+            invalid_csv = tmp / f"weather_method_{len(invalid_method)}.csv"
+            invalid_json = tmp / f"weather_method_{len(invalid_method)}.json"
+            invalid_row = dict(rain_row)
+            invalid_row["weather_capture_method"] = invalid_method
+            with invalid_csv.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(invalid_row))
+                writer.writeheader()
+                writer.writerow(invalid_row)
+            invalid_import = _run(
+                [
+                    sys.executable,
+                    "import_context_csv.py",
+                    "--input",
+                    str(invalid_csv),
+                    "--output",
+                    str(invalid_json),
+                ],
+                check=False,
+            )
+            assert invalid_import.returncode != 0
+            assert "weather_capture_method must be one of" in (
+                invalid_import.stdout + invalid_import.stderr
+            )
 
         invalid_method_payload = _nws_payload(capture_method="browser_summary")
         invalid_method_context = MatchContext(

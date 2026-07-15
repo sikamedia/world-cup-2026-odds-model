@@ -62,7 +62,8 @@ updateTime, a URL mismatch, no kickoff-covering period, or inconsistent
 caller-supplied timestamps fails closed.
 
 Record weather_capture_method as exactly direct_http_response_body or
-workspace_web_fetch. The former denotes retained direct HTTP response bytes.
+workspace_web_fetch; case, whitespace, and hyphen aliases are invalid. The
+former denotes retained direct HTTP response bytes.
 The latter is acceptable FOR THE WEATHER PATH ONLY and denotes an auditable
 workspace-tool text snapshot; it MUST NOT be described as a verbatim/raw HTTP
 response or as byte-identical to one. Rationale (2026-07-15 daily findings):
@@ -75,14 +76,21 @@ body; retain the dynamically discovered hourly URL in the context and evidence
 chain. Elo remains direct-capture-only; web_fetch can never satisfy the Elo
 contract.
 
-Schema 4 validates this source chain, freshness, and kickoff-period coverage.
-It does not infer a heat or rain category from forecast values and does not
-change the frozen weather adjustment mapping. The retained kickoff period must
-support the analyst's recorded decision.
+Schema 4 validates this source chain, freshness, and kickoff-period coverage
+for the third-place match and final. QF/SF artifacts remain schema 3, including
+any compliant SF102 retry before kickoff. Schema 4 does not infer a heat or rain
+category from forecast values and does not change the frozen weather adjustment
+mapping. The retained kickoff period must support the analyst's recorded
+decision.
 ```
 
 The URL appearing in a report or an interactive conversation does not update
 the scheduler's persistent provenance set.
+
+Do not register operational third-place or final fixtures until SF102 is
+settled and the real participants are known. At that point, add those real
+fixtures to the runner and template registries before scheduling their schema-4
+finalizations; synthetic teams are permitted only in tests.
 
 ## July 11 finalization incident (historical)
 
@@ -157,15 +165,17 @@ For each finalization run:
    and caller-supplied timestamps are not substitutes.
 3. Generate the fixture's one-match context template (`sf_jul14_15` for the
    semifinals), populate market and weather evidence, and retain every
-   referenced evidence snapshot. Outdoor api.weather.gov evidence retains the
-   points response and the exact followed hourly response as a verified chain;
-   record its capture method without treating workspace web_fetch text as raw
-   response bytes. Prefer a direct two-way advancement market;
+   referenced evidence snapshot. For third-place/final schema 4, outdoor
+   api.weather.gov evidence retains the points response and the exact followed
+   hourly response as a verified chain; record its exact canonical capture
+   method without treating workspace web_fetch text as raw response bytes.
+   Prefer a direct two-way advancement market;
    if it is unavailable, retain the 90-minute 1X2 market used by the documented
    draw-resolution fallback.
-4. Run `validate_context.py --require-weather-evidence
-   --require-structured-weather --now-utc <run-time>`; any error blocks
-   prediction. Supplying the run time makes future-evidence checks reproducible.
+4. Run `validate_context.py --require-weather-evidence --now-utc <run-time>`;
+   add `--require-structured-weather` for third-place/final schema 4. Any error
+   blocks prediction. Supplying the run time makes future-evidence checks
+   reproducible.
 5. Run both `./run_tests.sh` and `python3 -m pytest -q`. Any failure blocks the
    official prediction path.
 6. Run `predict_jul11.py finalize`. It validates only the selected fixture and
@@ -186,8 +196,17 @@ the model/weather/lineup basis. Elo must be no more than 30 minutes old at the
 freeze, and fixture identity/kickoff must match the canonical registry. Missing
 or mismatched evidence leaves the eligible count unchanged. A self-consistent
 payload hash is not proof of creation time: retain that hash in the append-only
-scheduler log or a pre-kickoff Git/WORM anchor and verify the anchor before
-grading. Without it, treat the freeze as ineligible.
+scheduler log or a pre-kickoff Git/WORM anchor. Grading defaults to rejection:
+the caller must supply `trusted_anchor_resolver`, which returns the matching
+source, anchor ID, payload digest, and an observation satisfying
+`frozen_at <= observed_at < kickoff`. Never derive this record from the local
+freeze. Official artifacts do not require the freeze-only resolver.
+
+The freeze must identify `predict_jul11._predict/v1`, the exact frozen knockout
+parameters (including `style_threshold=266`), and only the structured weather
+decision/scale plus home/away lineup scales. The validator replays the model
+from retained Elo, recomputes the selected market probability and any
+`derived_from_90` draw split, then verifies `reference_side` and frozen `w=0.6`.
 
 France vs Spain example (use new output paths for every attempt and populate the
 context before validation):
@@ -218,14 +237,12 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/sf101.csv \
   --output-json /tmp/sf101.json \
   --require-weather-evidence \
-  --require-structured-weather \
   --now-utc 2026-07-14T16:05:00Z \
   --context-only
 
 python3 validate_context.py \
   --context-file /tmp/sf101.json \
   --require-weather-evidence \
-  --require-structured-weather \
   --now-utc 2026-07-14T16:05:00Z
 
 ./run_tests.sh
@@ -268,14 +285,12 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/sf102.csv \
   --output-json /tmp/sf102.json \
   --require-weather-evidence \
-  --require-structured-weather \
   --now-utc 2026-07-15T16:05:00Z \
   --context-only
 
 python3 validate_context.py \
   --context-file /tmp/sf102.json \
   --require-weather-evidence \
-  --require-structured-weather \
   --now-utc 2026-07-15T16:05:00Z
 
 ./run_tests.sh
@@ -319,7 +334,6 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/qf99.csv \
   --output-json /tmp/qf99.json \
   --require-weather-evidence \
-  --require-structured-weather \
   --now-utc 2026-07-11T18:05:00Z \
   --context-only
 
@@ -358,7 +372,6 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/qf100.csv \
   --output-json /tmp/qf100.json \
   --require-weather-evidence \
-  --require-structured-weather \
   --now-utc 2026-07-11T22:05:00Z \
   --context-only
 
@@ -440,8 +453,9 @@ An official run is valid only when all of the following are true:
   confirms roof closure, records `roof_status=closed`, and matches the selected
   `weather_evidence_fixture_id`. A retractable-roof venue without that
   confirmation follows the outdoor path.
-- Outdoor api.weather.gov evidence records
+- Third-place/final schema-4 outdoor api.weather.gov evidence records
   `weather_capture_method=direct_http_response_body|workspace_web_fetch`,
+  with exact case and underscores (no whitespace, case, or hyphen aliases),
   retains matching SHA-256 values for both the points and hourly snapshots,
   proves that the points response `id` (or `properties.@id`) equals the declared
   points source, proves that `properties.forecastHourly` equals the hourly
@@ -460,11 +474,12 @@ An official run is valid only when all of the following are true:
   and advancement. Any absolute gap at or above 4 points sets
   `review_required=true` and must be surfaced in the run report; it is an
   investigation flag, not permission to change frozen parameters.
-- Each new official artifact uses schema 4 / `pre_registered_match_prediction`,
-  records `provenance_contract=direct_http_v1`, the receipt identity, its stage,
-  and a verified canonical payload SHA-256, and was generated before its exact
-  fixture kickoff. Artifact paths are create-only; the reader remains compatible
-  with historical schema 1, schema 2, and schema 3 artifacts.
+- QF/SF official artifacts use schema 3. Third-place/final artifacts use schema
+  4 / `pre_registered_match_prediction`. Both record
+  `provenance_contract=direct_http_v1`, the receipt identity, stage, and verified
+  canonical payload SHA-256, and must be generated before the exact fixture
+  kickoff. Artifact paths are create-only; the reader accepts schemas 1-4 but
+  rejects a schema/stage mismatch.
 - MC consumes the two stored official QF advancement probabilities without
   recalculating or republishing them. Fresh Elo is used only for future rounds,
   and the output states that live match state is not incorporated.

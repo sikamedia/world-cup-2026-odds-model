@@ -76,6 +76,8 @@ SCHEMA4_WEATHER_KEYS = frozenset(
         "forecast_generated_at_utc",
     }
 )
+SCHEMA4_STAGES = frozenset({"third_place", "final"})
+SCHEMA3_STAGES = frozenset({"quarterfinal", "semifinal"})
 
 
 @dataclass(frozen=True)
@@ -288,8 +290,22 @@ def _seal_artifact(payload: dict[str, Any]) -> dict[str, Any]:
     return {"payload": payload, "payload_sha256": _payload_sha256(payload)}
 
 
-def _weather_payload(context: MatchContext) -> dict[str, Any]:
-    return {
+def _artifact_schema_version(fixture: Fixture) -> int:
+    if fixture.stage in SCHEMA4_STAGES:
+        return ARTIFACT_SCHEMA_VERSION
+    if fixture.stage in SCHEMA3_STAGES:
+        return LEGACY_DIRECT_MATCH_ARTIFACT_SCHEMA_VERSION
+    raise PredictionRunError(
+        f"official artifact stage has no schema policy: {fixture.stage!r}"
+    )
+
+
+def _weather_payload(
+    context: MatchContext,
+    *,
+    schema_version: int,
+) -> dict[str, Any]:
+    payload = {
         "decision": context.weather_decision,
         "scale": context.weather_scale,
         "checked_at_utc": context.weather_checked_at_utc,
@@ -301,12 +317,18 @@ def _weather_payload(context: MatchContext) -> dict[str, Any]:
         "evidence_fixture_id": context.weather_evidence_fixture_id,
         "evidence_snapshot": context.weather_evidence_snapshot,
         "evidence_sha256": context.weather_evidence_sha256,
-        "capture_method": context.weather_capture_method,
-        "points_source": context.weather_points_source,
-        "points_evidence_snapshot": context.weather_points_evidence_snapshot,
-        "points_evidence_sha256": context.weather_points_evidence_sha256,
-        "forecast_generated_at_utc": context.weather_forecast_generated_at_utc,
     }
+    if schema_version == ARTIFACT_SCHEMA_VERSION:
+        payload.update(
+            {
+                "capture_method": context.weather_capture_method,
+                "points_source": context.weather_points_source,
+                "points_evidence_snapshot": context.weather_points_evidence_snapshot,
+                "points_evidence_sha256": context.weather_points_evidence_sha256,
+                "forecast_generated_at_utc": context.weather_forecast_generated_at_utc,
+            }
+        )
+    return payload
 
 
 def _build_artifact(
@@ -320,9 +342,10 @@ def _build_artifact(
     receipt = snapshot.capture_receipt
     if receipt is None:
         raise PredictionRunError("official artifact requires direct Elo capture provenance")
+    schema_version = _artifact_schema_version(fixture)
     top_scores = sorted(prediction["matrix"].items(), key=lambda item: -item[1])[:5]
     payload = {
-        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "artifact_type": ARTIFACT_TYPE,
         "fixture": {
             "slug": fixture.slug,
@@ -394,7 +417,7 @@ def _build_artifact(
         "context": {
             "lineup_home": context.lineup_home,
             "lineup_away": context.lineup_away,
-            "weather": _weather_payload(context),
+            "weather": _weather_payload(context, schema_version=schema_version),
             "notes": context.notes,
         },
         "elo_provenance": {
@@ -497,7 +520,9 @@ def _validate_finalize_context(
         require_evidence=True,
         now_utc=now,
         expected_fixture_id=fixture.fixture_id,
-        require_structured_weather=True,
+        require_structured_weather=(
+            _artifact_schema_version(fixture) == ARTIFACT_SCHEMA_VERSION
+        ),
     )
     try:
         actual_kickoff = _parse_utc(context.kickoff_at_utc or "", "kickoff_at_utc")
@@ -738,6 +763,15 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         )
     if not expected_identity:
         raise ArtifactError(f"artifact {artifact_path} has an unexpected fixture identity")
+    expected_schema_version = _artifact_schema_version(fixture)
+    if schema_version in {
+        ARTIFACT_SCHEMA_VERSION,
+        LEGACY_DIRECT_MATCH_ARTIFACT_SCHEMA_VERSION,
+    } and schema_version != expected_schema_version:
+        raise ArtifactError(
+            f"artifact {artifact_path} schema {schema_version} is not permitted for "
+            f"stage {fixture.stage}; expected schema {expected_schema_version}"
+        )
     generated = _parse_utc(payload.get("generated_at_utc", ""), "generated_at_utc")
     kickoff = _parse_utc(fixture.kickoff_at_utc, "kickoff_at_utc")
     if generated >= kickoff:

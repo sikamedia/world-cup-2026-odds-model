@@ -18,6 +18,18 @@ from elo_snapshot import load_elo_capture_receipt, parse_world_tsv_bytes
 import predict_jul11
 
 
+SCHEMA4_WEATHER_FIELDS = (
+    "capture_method",
+    "points_source",
+    "points_evidence_snapshot",
+    "points_evidence_sha256",
+    "forecast_generated_at_utc",
+)
+SCHEMA4_CONTEXT_FIELDS = tuple(
+    f"weather_{field}" for field in SCHEMA4_WEATHER_FIELDS
+)
+
+
 def _world_tsv() -> str:
     rows = [
         ("ES", 2177),
@@ -389,7 +401,7 @@ def main() -> None:
         )
         assert artifact_data["payload"]["official"]["model_weight"] == 0.6
         assert artifact_data["payload"]["elo_provenance"]["estimates"] == []
-        assert artifact_data["payload"]["schema_version"] == 4
+        assert artifact_data["payload"]["schema_version"] == 3
         assert artifact_data["payload"]["artifact_type"] == "pre_registered_match_prediction"
         assert artifact_data["payload"]["fixture"]["stage"] == "quarterfinal"
         elo_provenance = artifact_data["payload"]["elo_provenance"]
@@ -401,13 +413,8 @@ def main() -> None:
         assert elo_provenance["retained_receipt_name"] == first_receipt.name
         assert elo_provenance["body_byte_count"] == len(first_tsv.read_bytes())
         weather_provenance = artifact_data["payload"]["context"]["weather"]
-        assert weather_provenance["capture_method"] == "direct_http_response_body"
-        assert weather_provenance["points_source"].startswith(
-            "https://api.weather.gov/points/"
-        )
-        assert weather_provenance["forecast_generated_at_utc"] == (
-            "2026-07-11T18:05:00Z"
-        )
+        for schema4_field in SCHEMA4_WEATHER_FIELDS:
+            assert schema4_field not in weather_provenance
 
         missing_mc_receipt_args = _mc_args(
             artifacts=(norway_artifact, argentina_artifact),
@@ -425,8 +432,8 @@ def main() -> None:
         assert "--elo-receipt" in missing_mc_receipt[2]
         assert "PRE-REGISTERED ARTIFACT MC" not in missing_mc_receipt[1]
 
-        # Semifinal fixtures use the same fail-closed finalization path and the
-        # generic v4 artifact identity without changing the QF-only MC contract.
+        # Semifinal fixtures keep the schema-3 contract through SF102. Schema 4
+        # activates only for the third-place match and final.
         france_context = tmp / "france_context.json"
         france_row = _roof_row(
             kickoff="2026-07-14T19:00:00Z",
@@ -479,6 +486,7 @@ def main() -> None:
         assert "France vs Spain" in semifinal[1]
         assert "REVIEW FLAG model-market gap" in semifinal[1]
         semifinal_data = json.loads(france_artifact.read_text(encoding="ascii"))
+        assert semifinal_data["payload"]["schema_version"] == 3
         assert semifinal_data["payload"]["fixture"]["fixture_id"] == "2026-SF101-France-Spain"
         assert semifinal_data["payload"]["fixture"]["stage"] == "semifinal"
         assert semifinal_data["payload"]["market"]["odds_advance"] == [1.8, 2.2]
@@ -533,6 +541,7 @@ def main() -> None:
         )
         assert second_semifinal[0] == 0, second_semifinal[2]
         second_semifinal_data = json.loads(england_artifact.read_text(encoding="ascii"))
+        assert second_semifinal_data["payload"]["schema_version"] == 3
         assert second_semifinal_data["payload"]["fixture"] == {
             "away": "Argentina",
             "fixture_id": "2026-SF102-England-Argentina",
@@ -559,6 +568,162 @@ def main() -> None:
             second_semifinal_data["payload"]["official"]["advance_home"]
             - expected_fallback_official
         ) < 1e-12
+
+        # Schema 4 is staged for the remaining post-semifinal fixtures. A
+        # synthetic final exercises the same emitter/reader without registering
+        # teams before the real SF102 result is known.
+        synthetic_final = predict_jul11.Fixture(
+            slug="schema4-final-test",
+            fixture_id="2026-FINAL-Schema4-Test",
+            stage="final",
+            home="Norway",
+            away="England",
+            kickoff_at_utc="2026-07-11T21:00:00Z",
+        )
+        synthetic_third_place = predict_jul11.Fixture(
+            slug="schema4-third-place-test",
+            fixture_id="2026-3P-Schema4-Test",
+            stage="third_place",
+            home="Norway",
+            away="England",
+            kickoff_at_utc="2026-07-11T21:00:00Z",
+        )
+        assert predict_jul11._artifact_schema_version(synthetic_third_place) == 4
+        predict_jul11.FIXTURES[synthetic_final.slug] = synthetic_final
+        try:
+            schema4_final_artifact = tmp / "schema4_final.json"
+            schema4_final = _invoke(
+                _finalize_args(
+                    fixture=synthetic_final.slug,
+                    module=first_module,
+                    source_tsv=first_tsv,
+                    receipt=first_receipt,
+                    context=norway_context,
+                    artifact=schema4_final_artifact,
+                ),
+                now="2026-07-11T18:05:00Z",
+            )
+            assert schema4_final[0] == 0, schema4_final[2]
+            schema4_final_data = json.loads(
+                schema4_final_artifact.read_text(encoding="ascii")
+            )
+            assert schema4_final_data["payload"]["schema_version"] == 4
+            schema4_weather = schema4_final_data["payload"]["context"]["weather"]
+            assert schema4_weather["capture_method"] == "direct_http_response_body"
+            assert schema4_weather["points_source"].startswith(
+                "https://api.weather.gov/points/"
+            )
+            assert schema4_weather["forecast_generated_at_utc"] == (
+                "2026-07-11T18:05:00Z"
+            )
+            loaded_final, _probability, _digest = predict_jul11._load_artifact(
+                schema4_final_artifact,
+                now=predict_jul11._parse_utc("2026-07-11T18:10:00Z"),
+            )
+            assert loaded_final == synthetic_final
+
+            for missing_key in (
+                "decision",
+                "capture_method",
+                "source",
+                "evidence_snapshot",
+                "evidence_sha256",
+            ):
+                missing_weather_data = json.loads(
+                    schema4_final_artifact.read_text(encoding="ascii")
+                )
+                del missing_weather_data["payload"]["context"]["weather"][missing_key]
+                missing_weather_data["payload_sha256"] = predict_jul11._payload_sha256(
+                    missing_weather_data["payload"]
+                )
+                missing_weather = tmp / f"missing_weather_{missing_key}.json"
+                missing_weather.write_text(
+                    json.dumps(missing_weather_data),
+                    encoding="ascii",
+                )
+                try:
+                    predict_jul11._load_artifact(
+                        missing_weather,
+                        now=predict_jul11._parse_utc("2026-07-11T18:10:00Z"),
+                    )
+                except predict_jul11.ArtifactError as exc:
+                    assert "missing required schema-4 weather provenance keys" in str(exc)
+                else:
+                    raise AssertionError(
+                        f"schema-4 artifact accepted without weather key {missing_key}"
+                    )
+
+            # A valid schema-4 envelope cannot be relabelled as a QF/SF
+            # artifact; those stages remain on schema 3 through SF102.
+            wrong_stage_data = json.loads(
+                schema4_final_artifact.read_text(encoding="ascii")
+            )
+            wrong_stage_data["payload"]["fixture"] = artifact_data["payload"][
+                "fixture"
+            ]
+            wrong_stage_data["payload_sha256"] = predict_jul11._payload_sha256(
+                wrong_stage_data["payload"]
+            )
+            wrong_stage = tmp / "schema4_qf_not_permitted.json"
+            wrong_stage.write_text(json.dumps(wrong_stage_data), encoding="ascii")
+            try:
+                predict_jul11._load_artifact(
+                    wrong_stage,
+                    now=predict_jul11._parse_utc("2026-07-11T18:10:00Z"),
+                )
+            except predict_jul11.ArtifactError as exc:
+                assert "expected schema 3" in str(exc)
+            else:
+                raise AssertionError("schema-4 artifact was accepted for a QF fixture")
+
+            legacy_weather_row = _weather_row(
+                kickoff=synthetic_final.kickoff_at_utc,
+                checked="2026-07-11T18:05:00Z",
+                decision="heat_mild",
+                scale=0.95,
+            )
+            for field in SCHEMA4_CONTEXT_FIELDS:
+                legacy_weather_row.pop(field, None)
+            legacy_final_context = tmp / "legacy_final_context.json"
+            _write_context(
+                legacy_final_context,
+                "Norway|England",
+                legacy_weather_row,
+            )
+            legacy_schema3_output = tmp / "legacy_schema3_qf.json"
+            accepted_legacy_weather = _invoke(
+                _finalize_args(
+                    fixture="norway-england",
+                    module=first_module,
+                    source_tsv=first_tsv,
+                    receipt=first_receipt,
+                    context=legacy_final_context,
+                    artifact=legacy_schema3_output,
+                ),
+                now="2026-07-11T18:05:00Z",
+            )
+            assert accepted_legacy_weather[0] == 0, accepted_legacy_weather[2]
+            assert json.loads(legacy_schema3_output.read_text(encoding="ascii"))[
+                "payload"
+            ]["schema_version"] == 3
+
+            invalid_schema4_output = tmp / "invalid_schema4_final.json"
+            rejected_legacy_weather = _invoke(
+                _finalize_args(
+                    fixture=synthetic_final.slug,
+                    module=first_module,
+                    source_tsv=first_tsv,
+                    receipt=first_receipt,
+                    context=legacy_final_context,
+                    artifact=invalid_schema4_output,
+                ),
+                now="2026-07-11T18:05:00Z",
+            )
+            assert rejected_legacy_weather[0] != 0
+            assert "weather_capture_method" in rejected_legacy_weather[2]
+            assert not invalid_schema4_output.exists()
+        finally:
+            predict_jul11.FIXTURES.pop(synthetic_final.slug, None)
 
         # SF-specific fail-closed cases must publish neither an artifact nor
         # official probabilities.
@@ -871,55 +1036,13 @@ def main() -> None:
         assert invalid_schema_mc[0] != 0
         assert "invalid schema_version type" in invalid_schema_mc[2]
 
-        # Schema 4 readers require the complete sealed weather key set before
-        # coercion can supply any MatchContext defaults.
-        for missing_key in (
-            "decision",
-            "capture_method",
-            "source",
-            "evidence_snapshot",
-            "evidence_sha256",
-        ):
-            missing_weather_data = json.loads(
-                norway_artifact.read_text(encoding="ascii")
-            )
-            del missing_weather_data["payload"]["context"]["weather"][missing_key]
-            missing_weather_data["payload_sha256"] = predict_jul11._payload_sha256(
-                missing_weather_data["payload"]
-            )
-            missing_weather = tmp / f"missing_weather_{missing_key}.json"
-            missing_weather.write_text(
-                json.dumps(missing_weather_data),
-                encoding="ascii",
-            )
-            missing_weather_mc = _invoke(
-                _mc_args(
-                    artifacts=(missing_weather, argentina_artifact),
-                    module=mc_module,
-                    source_tsv=mc_tsv,
-                    receipt=mc_receipt,
-                ),
-                now="2026-07-11T22:10:00Z",
-            )
-            assert missing_weather_mc[0] != 0
-            assert "missing required schema-4 weather provenance keys" in (
-                missing_weather_mc[2]
-            )
-
         # Previously published v3 artifacts remain readable and retain their
         # direct-Elo provenance requirement; schema 4 weather fields are not
         # applied retroactively.
-        schema4_weather_fields = (
-            "capture_method",
-            "points_source",
-            "points_evidence_snapshot",
-            "points_evidence_sha256",
-            "forecast_generated_at_utc",
-        )
         legacy_v3_data = json.loads(norway_artifact.read_text(encoding="ascii"))
         legacy_v3_data["payload"]["schema_version"] = 3
-        for field in schema4_weather_fields:
-            legacy_v3_data["payload"]["context"]["weather"].pop(field)
+        for field in SCHEMA4_WEATHER_FIELDS:
+            legacy_v3_data["payload"]["context"]["weather"].pop(field, None)
         legacy_v3_data["payload_sha256"] = predict_jul11._payload_sha256(
             legacy_v3_data["payload"]
         )

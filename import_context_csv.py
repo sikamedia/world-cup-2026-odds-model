@@ -150,15 +150,14 @@ def _parse_roof_status(raw: str | None) -> str | None:
 
 
 def _parse_weather_capture_method(raw: str | None) -> str | None:
-    if raw is None:
+    if raw is None or raw == "":
         return None
-    value = raw.strip().lower().replace("-", "_")
     allowed = {"direct_http_response_body", "workspace_web_fetch"}
-    if value not in allowed:
+    if raw not in allowed:
         raise ValueError(
             f"weather_capture_method must be one of: {', '.join(sorted(allowed))}"
         )
-    return value
+    return raw
 
 
 def _parse_competition_state(row: dict[str, str]) -> dict | None:
@@ -229,7 +228,7 @@ def _parse_row(row: dict[str, str], source_label: str) -> tuple[str, dict, str]:
     if weather_evidence_sha256 is not None:
         payload["weather_evidence_sha256"] = weather_evidence_sha256
     weather_capture_method = _parse_weather_capture_method(
-        _first_non_empty(row, ["weather_capture_method"])
+        row.get("weather_capture_method")
     )
     if weather_capture_method is not None:
         payload["weather_capture_method"] = weather_capture_method

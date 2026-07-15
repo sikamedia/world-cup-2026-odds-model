@@ -166,16 +166,17 @@ hourly response reached through its exact `properties.forecastHourly` URL.
 The points response `id` (or `properties.@id`) must equal the declared points
 URL.
 Record `weather_capture_method` as `direct_http_response_body` or
-`workspace_web_fetch`, plus `weather_points_source`,
+`workspace_web_fetch` exactly; case, whitespace, and hyphen aliases are rejected.
+Also record `weather_points_source`,
 `weather_points_evidence_snapshot`, and
 `weather_points_evidence_sha256`. The hourly `properties.updateTime` is the
 only forecast issuance time; store `generatedAt` separately as
 `weather_forecast_generated_at_utc`. The retained hourly periods must contain
 one with `startTime <= kickoff < endTime`. A `workspace_web_fetch` snapshot is
 auditable tool text, not raw or byte-identical HTTP response evidence.
-Schema 4 validates this provenance chain and period coverage; it does not infer
-the `heat_*` or `rain_*` decision from forecast values or change the frozen
-weather adjustment mapping.
+Schema 4 validates this provenance chain and period coverage for third-place
+and final artifacts; it does not infer the `heat_*` or `rain_*` decision from
+forecast values or change the frozen weather adjustment mapping.
 
 `indoor_no_weather` is valid only with official, match-specific roof evidence
 checked within six hours, `roof_status=closed`, and the selected fixture's exact
@@ -184,19 +185,27 @@ evidence.
 
 Use `create_context_template.py --source sf_jul14_15 --fixture <slug>` to create
 one semifinal finalization template, then import the completed CSV with
-`--require-weather-evidence --require-structured-weather --context-only`.
+`--require-weather-evidence --context-only`.
 `predict_jul11.py finalize` and
-`predict_jul11.py mc` require the matching `--elo-receipt`; finalization writes
-a stage-labelled schema-4, hashed, create-only artifact with
-`direct_http_v1` provenance for exactly that fixture. Direct two-way advancement
+`predict_jul11.py mc` require the matching `--elo-receipt`; QF/SF finalization
+writes a stage-labelled schema-3, hashed, create-only artifact with
+`direct_http_v1` provenance for exactly that fixture. Third-place/final uses
+schema 4 and requires `--require-structured-weather`. Register those real
+fixtures only after SF102 settles; do not invent participants. Direct two-way advancement
 odds take precedence over the documented 90-minute fallback. The historical
-`predict_jul11.py mc` path remains QF-only, and schema-1/schema-2/schema-3
-artifacts remain readable.
+`predict_jul11.py mc` path remains QF-only, and schemas 1-4 remain readable only
+at their permitted stages.
 The 11 `live_current_elo` fixtures through France-Spain are explicitly
 grandfathered. Any new ensemble-ledger fixture is counted only when
 `pre_match_evidence` points to a validated official artifact or sealed
-pre-match freeze under `evidence/`. The evidence must bind fresh direct-Elo bytes/receipt and the
-frozen model/market probabilities; post-match reconstruction is rejected.
+pre-match freeze under `evidence/`. The evidence must bind fresh direct-Elo
+bytes/receipt and the frozen model/market probabilities; post-match
+reconstruction is rejected. Freeze admission defaults to denial unless the
+caller supplies a trusted external resolver whose source/anchor ID/digest match
+and whose observation satisfies `frozen_at <= observed_at < kickoff`. The
+validator replays `predict_jul11._predict/v1` with the exact frozen knockout,
+weather, and lineup basis before accepting the recorded probability. Official
+artifacts do not use this freeze-only resolver.
 See
 [AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md) for the external scheduler
 contract and finalization times.

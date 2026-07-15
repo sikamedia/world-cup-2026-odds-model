@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
-from math import fsum, sqrt
+from math import fsum, isfinite, sqrt
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 from urllib.parse import urlparse
 
 from elo_snapshot import (
@@ -33,6 +33,19 @@ ENSEMBLE_FREEZE_SCHEMA_VERSION = 1
 ENSEMBLE_FREEZE_ARTIFACT_TYPE = "ensemble_pre_match_freeze"
 ENSEMBLE_MAX_ELO_AGE = timedelta(minutes=30)
 ENSEMBLE_MODEL_WEIGHT = 0.6
+ENSEMBLE_MODEL_ENGINE = "predict_jul11._predict/v1"
+ENSEMBLE_MODEL_PROFILE = "knockout"
+ENSEMBLE_MODEL_STYLE_THRESHOLD = 266.0
+ENSEMBLE_MODEL_PARAMETER_KEYS = (
+    "avg_goals",
+    "gd_per_100",
+    "draw_boost",
+    "ko_regress",
+    "ko_regress_max",
+    "ko_elo_scale",
+    "pen_tilt",
+    "lambda_floor",
+)
 ENSEMBLE_PRE_POLICY_LIVE_FIXTURES = frozenset(
     {
         (date(2026, 7, 5), "R16", "Brazil", "Norway"),
@@ -48,6 +61,19 @@ ENSEMBLE_PRE_POLICY_LIVE_FIXTURES = frozenset(
         (date(2026, 7, 14), "SF", "France", "Spain"),
     }
 )
+
+
+@dataclass(frozen=True)
+class TrustedTimingAnchor:
+    """One digest observation returned by an external trusted system."""
+
+    source: str
+    anchor_id: str
+    payload_sha256: str
+    observed_at_utc: datetime
+
+
+TrustedAnchorResolver = Callable[[str, str], TrustedTimingAnchor]
 
 
 def _check_probability(value: float, field: str) -> float:
@@ -852,7 +878,7 @@ def _canonical_json_bytes(payload: dict[str, Any]) -> bytes:
     return encoded.encode("ascii")
 
 
-def _load_pre_match_envelope(path: Path) -> dict[str, Any]:
+def _load_pre_match_envelope(path: Path) -> tuple[dict[str, Any], str]:
     try:
         envelope = json.loads(path.read_text(encoding="ascii"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -870,7 +896,7 @@ def _load_pre_match_envelope(path: Path) -> dict[str, Any]:
         raise ValueError(
             f"pre-match evidence hash mismatch for {path}: stored={digest}, actual={actual}"
         )
-    return payload
+    return payload, digest
 
 
 def _resolve_ledger_evidence(ledger_path: Path, raw: str, field: str) -> Path:
@@ -884,12 +910,20 @@ def _resolve_ledger_evidence(ledger_path: Path, raw: str, field: str) -> Path:
     ):
         raise ValueError(f"{field} must be a repository-relative path under evidence/")
     root = ledger_path.parent.resolve()
-    approved_root = (root / "evidence").resolve()
-    resolved = (root / relative).resolve()
+    candidate = root
+    for part in relative.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise ValueError(f"{field} must not use symbolic links")
+    try:
+        approved_root = (root / "evidence").resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"cannot resolve {field}: {exc}") from exc
     if resolved == approved_root or approved_root not in resolved.parents:
         raise ValueError(f"{field} escapes the repository evidence directory")
-    if (root / relative).is_symlink():
-        raise ValueError(f"{field} must not be a symbolic link")
+    if not resolved.is_file():
+        raise ValueError(f"{field} must resolve to a regular file")
     return resolved
 
 
@@ -929,6 +963,53 @@ def _require_probability_match(actual: float, recorded: float, field: str) -> No
         )
 
 
+def _require_exact_probability_match(
+    actual: float,
+    recorded: float,
+    field: str,
+) -> None:
+    if abs(actual - recorded) > 1e-9:
+        raise ValueError(
+            f"{field} is internally inconsistent: "
+            f"recorded={recorded:.12f}, calculated={actual:.12f}"
+        )
+
+
+def _require_exact_keys(
+    value: dict[str, Any],
+    expected: set[str],
+    field: str,
+) -> None:
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unknown = sorted(actual - expected)
+        details = []
+        if missing:
+            details.append(f"missing={missing}")
+        if unknown:
+            details.append(f"unknown={unknown}")
+        raise ValueError(f"{field} keys must match schema ({', '.join(details)})")
+
+
+def _required_finite_number(
+    raw: object,
+    field: str,
+    *,
+    positive: bool = False,
+) -> float:
+    if isinstance(raw, bool):
+        raise ValueError(f"{field} must be numeric")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be numeric") from exc
+    if not isfinite(value) or (positive and value <= 0.0):
+        qualifier = "finite and positive" if positive else "finite"
+        raise ValueError(f"{field} must be {qualifier}")
+    return value
+
+
 def _validate_retained_elo(
     evidence_path: Path,
     elo: object,
@@ -936,7 +1017,7 @@ def _validate_retained_elo(
     home: str,
     away: str,
     frozen_at: datetime,
-) -> None:
+) -> dict[str, float]:
     if not isinstance(elo, dict):
         raise ValueError("pre-match evidence requires elo_provenance")
     if elo.get("source") != OFFICIAL_ELO_SOURCE:
@@ -1025,6 +1106,155 @@ def _validate_retained_elo(
             "estimated Elo is ineligible for ensemble review: "
             + ", ".join(estimated_participants)
         )
+    return {team: float(ratings[team]) for team in (home, away)}
+
+
+def _validate_freeze_timing_anchor(
+    payload: dict[str, Any],
+    payload_sha256: str,
+    *,
+    frozen_at: datetime,
+    kickoff: datetime,
+    trusted_anchor_resolver: TrustedAnchorResolver | None,
+) -> None:
+    reference = payload.get("timing_anchor")
+    if not isinstance(reference, dict):
+        raise ValueError("ensemble freeze requires timing_anchor")
+    source = reference.get("source")
+    anchor_id = reference.get("anchor_id")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("ensemble freeze timing_anchor.source must be non-empty")
+    if not isinstance(anchor_id, str) or not anchor_id.strip():
+        raise ValueError("ensemble freeze timing_anchor.anchor_id must be non-empty")
+    source = source.strip()
+    anchor_id = anchor_id.strip()
+    if trusted_anchor_resolver is None:
+        raise ValueError(
+            "ensemble freeze requires an external trusted timing-anchor resolver"
+        )
+    try:
+        anchor = trusted_anchor_resolver(source, anchor_id)
+    except (LookupError, OSError) as exc:
+        raise ValueError(
+            f"cannot resolve trusted timing anchor {source}:{anchor_id}: {exc}"
+        ) from exc
+    if not isinstance(anchor, TrustedTimingAnchor):
+        raise ValueError("trusted timing-anchor resolver returned an invalid record")
+    if anchor.source != source or anchor.anchor_id != anchor_id:
+        raise ValueError("trusted timing anchor identity does not match freeze reference")
+    if not _is_sha256(anchor.payload_sha256):
+        raise ValueError("trusted timing anchor has an invalid payload SHA-256")
+    if anchor.payload_sha256.lower() != payload_sha256:
+        raise ValueError("trusted timing anchor does not match freeze payload SHA-256")
+    observed_at = anchor.observed_at_utc
+    if (
+        not isinstance(observed_at, datetime)
+        or observed_at.tzinfo is None
+        or observed_at.utcoffset() is None
+    ):
+        raise ValueError("trusted timing anchor observed_at_utc must include timezone")
+    observed_at = observed_at.astimezone(timezone.utc)
+    if observed_at < frozen_at:
+        raise ValueError("trusted timing anchor predates the declared freeze time")
+    if observed_at >= kickoff:
+        raise ValueError("trusted timing anchor was observed at/after kickoff")
+
+
+def _replay_freeze_model(
+    model_basis: object,
+    context_basis: object,
+    ratings: dict[str, float],
+    *,
+    home: str,
+    away: str,
+) -> dict[str, Any]:
+    from match_context import MatchContext, WEATHER_DECISION_SCALES
+    from predict_jul11 import KO, _predict
+
+    if not isinstance(model_basis, dict):
+        raise ValueError("ensemble freeze requires structured model_basis")
+    _require_exact_keys(
+        model_basis,
+        {"engine", "profile", "parameters"},
+        "model_basis",
+    )
+    if model_basis.get("engine") != ENSEMBLE_MODEL_ENGINE:
+        raise ValueError(
+            f"ensemble freeze model_basis.engine must be {ENSEMBLE_MODEL_ENGINE}"
+        )
+    if model_basis.get("profile") != ENSEMBLE_MODEL_PROFILE:
+        raise ValueError(
+            f"ensemble freeze model_basis.profile must be {ENSEMBLE_MODEL_PROFILE}"
+        )
+    parameters = model_basis.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ValueError("ensemble freeze requires model_basis.parameters")
+    _require_exact_keys(
+        parameters,
+        {*ENSEMBLE_MODEL_PARAMETER_KEYS, "style_threshold"},
+        "model_basis.parameters",
+    )
+    for key in ENSEMBLE_MODEL_PARAMETER_KEYS:
+        actual = _required_finite_number(
+            parameters.get(key), f"model_basis.parameters.{key}"
+        )
+        if actual != float(KO[key]):
+            raise ValueError(
+                f"ensemble freeze model parameter {key} does not match the frozen profile"
+            )
+    style_threshold = _required_finite_number(
+        parameters.get("style_threshold"),
+        "model_basis.parameters.style_threshold",
+        positive=True,
+    )
+    if style_threshold != ENSEMBLE_MODEL_STYLE_THRESHOLD:
+        raise ValueError(
+            "ensemble freeze model parameter style_threshold does not match "
+            "the frozen profile"
+        )
+
+    if not isinstance(context_basis, dict):
+        raise ValueError("ensemble freeze requires structured context_basis")
+    _require_exact_keys(context_basis, {"weather", "lineup"}, "context_basis")
+    weather = context_basis.get("weather")
+    lineup = context_basis.get("lineup")
+    if not isinstance(weather, dict) or not isinstance(lineup, dict):
+        raise ValueError(
+            "ensemble freeze requires structured weather and lineup context basis"
+        )
+    _require_exact_keys(weather, {"decision", "scale"}, "context_basis.weather")
+    _require_exact_keys(
+        lineup,
+        {"home_scale", "away_scale"},
+        "context_basis.lineup",
+    )
+    weather_decision = weather.get("decision")
+    if not isinstance(weather_decision, str) or weather_decision not in WEATHER_DECISION_SCALES:
+        raise ValueError("ensemble freeze weather decision is invalid")
+    weather_scale = _required_finite_number(
+        weather.get("scale"), "context_basis.weather.scale", positive=True
+    )
+    if weather_scale != WEATHER_DECISION_SCALES[weather_decision]:
+        raise ValueError(
+            "ensemble freeze weather scale does not match the recorded decision"
+        )
+    lineup_home = _required_finite_number(
+        lineup.get("home_scale"), "context_basis.lineup.home_scale", positive=True
+    )
+    lineup_away = _required_finite_number(
+        lineup.get("away_scale"), "context_basis.lineup.away_scale", positive=True
+    )
+    return _predict(
+        home,
+        away,
+        ratings,
+        MatchContext(
+            weather_scale=weather_scale,
+            weather_decision=weather_decision,
+            lineup_home=lineup_home,
+            lineup_away=lineup_away,
+        ),
+    )
 
 
 def _validate_freeze_market(
@@ -1033,6 +1263,7 @@ def _validate_freeze_market(
     frozen_at: datetime,
     reference_side: str,
     recorded_probability: float,
+    expected_draw_resolution_home: float,
 ) -> None:
     if not isinstance(market, dict):
         raise ValueError("ensemble freeze requires market_evidence")
@@ -1066,6 +1297,11 @@ def _validate_freeze_market(
                 float(market.get("draw_resolution_home")),
                 "market_evidence.draw_resolution_home",
             )
+            if abs(draw_resolution_home - expected_draw_resolution_home) > 1e-9:
+                raise ValueError(
+                    "market_evidence.draw_resolution_home does not match the "
+                    "replayed frozen model"
+                )
             home_probability = probabilities[0] + probabilities[1] * draw_resolution_home
         else:
             raise ValueError(
@@ -1077,7 +1313,7 @@ def _validate_freeze_market(
     calculated = (
         home_probability if reference_side == "H" else 1.0 - home_probability
     )
-    _require_probability_match(
+    _require_exact_probability_match(
         calculated, recorded_probability, "ensemble freeze market probability"
     )
 
@@ -1094,11 +1330,12 @@ def _validate_ensemble_pre_match_evidence(
     p_model: float,
     p_market: float,
     p_ensemble: float,
+    trusted_anchor_resolver: TrustedAnchorResolver | None,
 ) -> None:
     evidence_path = _resolve_ledger_evidence(
         ledger_path, evidence_ref, "pre_match_evidence"
     )
-    payload = _load_pre_match_envelope(evidence_path)
+    payload, payload_sha256 = _load_pre_match_envelope(evidence_path)
     fixture = payload.get("fixture")
     if not isinstance(fixture, dict):
         raise ValueError("pre-match evidence requires fixture identity")
@@ -1141,6 +1378,13 @@ def _validate_ensemble_pre_match_evidence(
         )
         if frozen_at >= kickoff:
             raise ValueError("ensemble freeze must be created before kickoff")
+        _validate_freeze_timing_anchor(
+            payload,
+            payload_sha256,
+            frozen_at=frozen_at,
+            kickoff=kickoff,
+            trusted_anchor_resolver=trusted_anchor_resolver,
+        )
         if payload.get("reference_side") != reference_side:
             raise ValueError("ensemble freeze reference_side does not match ledger")
         probabilities = payload.get("probabilities")
@@ -1159,26 +1403,41 @@ def _validate_ensemble_pre_match_evidence(
             ENSEMBLE_MODEL_WEIGHT * evidence_model
             + (1.0 - ENSEMBLE_MODEL_WEIGHT) * evidence_market
         )
-        _require_probability_match(
+        _require_exact_probability_match(
             expected_ensemble,
             evidence_ensemble,
             "ensemble freeze blended probability",
         )
-        model_basis = payload.get("model_basis")
-        if not isinstance(model_basis, dict) or not model_basis.get("profile"):
-            raise ValueError("ensemble freeze requires model_basis.profile")
-        context_basis = payload.get("context_basis")
-        if (
-            not isinstance(context_basis, dict)
-            or not context_basis.get("weather")
-            or not context_basis.get("lineup")
-        ):
-            raise ValueError("ensemble freeze requires weather and lineup basis")
+        ratings = _validate_retained_elo(
+            evidence_path,
+            payload.get("elo_provenance"),
+            home=home,
+            away=away,
+            frozen_at=frozen_at,
+        )
+        replay = _replay_freeze_model(
+            payload.get("model_basis"),
+            payload.get("context_basis"),
+            ratings,
+            home=home,
+            away=away,
+        )
+        replayed_model = _probability_for_reference(
+            replay["advance_home"],
+            reference_side,
+            "replayed ensemble freeze model.advance_home",
+        )
+        _require_exact_probability_match(
+            replayed_model,
+            evidence_model,
+            "ensemble freeze model probability",
+        )
         _validate_freeze_market(
             payload.get("market_evidence"),
             frozen_at=frozen_at,
             reference_side=reference_side,
             recorded_probability=evidence_market,
+            expected_draw_resolution_home=float(replay["draw_resolution_home"]),
         )
     else:
         from predict_jul11 import ArtifactError, _load_artifact
@@ -1217,19 +1476,18 @@ def _validate_ensemble_pre_match_evidence(
             ENSEMBLE_MODEL_WEIGHT * evidence_model
             + (1.0 - ENSEMBLE_MODEL_WEIGHT) * evidence_market
         )
-        _require_probability_match(
+        _require_exact_probability_match(
             expected_ensemble,
             evidence_ensemble,
             "official artifact blended probability",
         )
-
-    _validate_retained_elo(
-        evidence_path,
-        payload.get("elo_provenance"),
-        home=home,
-        away=away,
-        frozen_at=frozen_at,
-    )
+        _validate_retained_elo(
+            evidence_path,
+            payload.get("elo_provenance"),
+            home=home,
+            away=away,
+            frozen_at=frozen_at,
+        )
     _require_probability_match(evidence_model, p_model, "ensemble model probability")
     _require_probability_match(evidence_market, p_market, "ensemble market probability")
     _require_probability_match(evidence_ensemble, p_ensemble, "ensemble blended probability")
@@ -1316,11 +1574,15 @@ def summarize_ensemble_basis(
     live_basis: str = "live_current_elo",
     minimum_for_refit: int = 12,
     current_weight: float = 0.6,
+    trusted_anchor_resolver: TrustedAnchorResolver | None = None,
 ) -> EnsembleBasisSummary:
     """Validate prospective live-basis rows and refit only at the n=12 gate.
 
     Historical ``mixed_legacy`` and counterfactual rows remain visible in the
     basis counts but never enter either the eligible n or the weight grid.
+    Sealed freeze records default to ineligible unless the caller supplies an
+    external ``trusted_anchor_resolver``; official artifacts do not use that
+    resolver. Repository-local timestamps and hashes are never auto-trusted.
     """
     _check_probability(current_weight, "current_weight")
     if minimum_for_refit <= 0:
@@ -1421,6 +1683,7 @@ def summarize_ensemble_basis(
                     p_model=p_model,
                     p_market=p_market,
                     p_ensemble=p_recorded,
+                    trusted_anchor_resolver=trusted_anchor_resolver,
                 )
             except (TypeError, ValueError) as exc:
                 raise ValueError(

@@ -95,8 +95,14 @@ description: >-
 >   direct-Elo bytes/receipt, model and market probabilities, selected market
 >   odds and de-margin method, and weather/lineup basis. Post-match capture or
 >   reconstructed probabilities fail closed and cannot trigger the n=12 grid.
->   The evidence hash must also appear in a trusted pre-kickoff scheduler,
->   Git, or WORM anchor; a self-reported timestamp is not proof of creation.
+>   Freeze admission defaults to denial. Its caller must provide an external
+>   trusted-anchor resolver whose source/anchor ID/payload digest match and whose
+>   observation satisfies `frozen_at <= observed_at < kickoff`; a self-reported
+>   timestamp is not proof of creation. The validator replays
+>   `predict_jul11._predict/v1` with the exact frozen knockout parameters,
+>   weather decision/scale, and lineup scales before accepting `reference_side`,
+>   market (including any 90-minute draw split), or ensemble probabilities.
+>   Official artifacts do not use this freeze-only resolver.
 >   Grid-fit optimum was w=1.0, but
 >   3 of 8 games are market-wrong-side low-frequency events — half-step to 0.6.
 > - **graded-k HELD.** At n=28, graded-minus-flat-1.00 Brier is +0.0036 with
@@ -390,11 +396,13 @@ Run from the skill directory (numpy needed only for the Monte Carlo;
   --elo-module <elo.py> --elo-source-tsv <World.tsv> --elo-receipt
   <receipt.json> --context-file <context.json> --artifact-out <final.json>`
   finalizes exactly one pre-kickoff knockout match into a create-only hashed
-  schema-4 `pre_registered_match_prediction` artifact with its direct-HTTP
-  receipt and stage recorded, using frozen w=0.6 model / 0.4 market. A direct
+  `pre_registered_match_prediction` artifact with its direct-HTTP receipt and
+  stage recorded, using frozen w=0.6 model / 0.4 market. QF/SF remains schema 3;
+  schema 4 activates only for third-place/final after SF102 settles and the real
+  fixtures are registered. A direct
   two-way advancement market is preferred; otherwise the artifact explicitly
   marks the 90-minute-market fallback. The reader remains compatible with
-  historical schema-1, schema-2, and schema-3 artifacts.
+  schemas 1-4 at their permitted stages.
 - `python predict_jul11.py mc --artifacts <qf99.json> <qf100.json> --elo-module
   <elo.py> --elo-source-tsv <World.tsv> --elo-receipt <receipt.json>
   --qf98-winner {Spain,Belgium}` consumes the stored QF probabilities without
@@ -482,8 +490,9 @@ June-26 result update path:
    Use `--source jun26` for the June 26 slate or `--source sf_jul14_15` for the
    semifinals. Semifinal templates also accept optional direct two-way
    `market_advance_odds`; their de-margin method is the row's `market_method`.
-   Official schema-4 artifacts retain direct-HTTP receipt provenance and signed
-   model-minus-market gaps, and set a
+   Third-place/final schema-4 artifacts retain structured weather provenance in
+   addition to direct-HTTP receipt provenance and signed model-minus-market gaps,
+   and set a
    review flag at 4 points; the flag prompts investigation and never changes
    frozen parameters automatically.
 2. `python fetch_the_odds_api.py --fixture-csv <template.csv> --fixture-json
@@ -513,15 +522,17 @@ hourly response at its exact `properties.forecastHourly` URL, with matching
 source fields, snapshots, and SHA-256 values. The points response `id` (or
 `properties.@id`) must equal the declared points URL. Record
 `weather_capture_method` as `direct_http_response_body` or
-`workspace_web_fetch`; the latter is an auditable tool-text snapshot, not raw
-or byte-identical HTTP response bytes.
+`workspace_web_fetch` exactly; case, whitespace, and hyphen aliases fail closed.
+The latter is an auditable tool-text snapshot, not raw or byte-identical HTTP
+response bytes.
 Use hourly `properties.updateTime` as the sole issuance timestamp, record
 `generatedAt` separately as `weather_forecast_generated_at_utc`, and require a
 real period satisfying `startTime <= kickoff < endTime`. Caller-supplied
 issue/valid timestamps must match the retained JSON; any mismatch fails closed.
-This schema verifies provenance and period coverage; it does not infer a
-`heat_*` or `rain_*` decision from the forecast values or change the frozen
-weather adjustment mapping.
+For third-place/final artifacts, schema 4 verifies provenance and period
+coverage; it does not infer a `heat_*` or `rain_*` decision from the forecast
+values or change the frozen weather adjustment mapping. QF/SF artifacts remain
+schema 3, including any compliant SF102 retry before kickoff.
 Current Elo provenance is likewise mandatory for daily and official runs: use
 the create-only direct-response capture and its receipt, never a copied or
 reconstructed TSV. Unverified legacy input is replay-only and cannot enter an

@@ -223,14 +223,12 @@ def _coerce_weather_evidence_type(raw: Any) -> str | None:
 
 
 def _coerce_weather_capture_method(raw: Any) -> str | None:
-    text = _coerce_optional_text(raw)
-    if text is None:
+    if raw is None or raw == "":
         return None
-    value = text.lower().replace("-", "_")
-    if value not in WEATHER_CAPTURE_METHODS:
+    if not isinstance(raw, str) or raw not in WEATHER_CAPTURE_METHODS:
         allowed = ", ".join(sorted(WEATHER_CAPTURE_METHODS))
         raise ValueError(f"weather_capture_method must be one of: {allowed}")
-    return value
+    return raw
 
 
 def _coerce_roof_status(raw: Any) -> str | None:
