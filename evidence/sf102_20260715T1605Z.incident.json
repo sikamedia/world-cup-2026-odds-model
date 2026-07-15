@@ -1,0 +1,83 @@
+{
+  "schema_version": 3,
+  "artifact_type": "pre_registered_match_prediction_incident",
+  "provenance_contract": "direct_http_v1",
+  "run_id": "sf102_england_argentina_final",
+  "fixture": "england-argentina",
+  "stage": "SF2",
+  "venue": "Mercedes-Benz Stadium, Atlanta (retractable roof)",
+  "kickoff_utc": "2026-07-15T19:00:00Z",
+  "scheduled_run_utc": "2026-07-15T16:05:00Z",
+  "run_started_utc": "2026-07-15T16:06:13Z",
+  "run_environment": "cowork-sandbox (isolated Linux shell, egress via allowlisted proxy)",
+  "status": "FAIL_CLOSED_NO_OFFICIAL_PROBABILITY",
+  "fail_closed_condition": "elo_capture_failed",
+  "official_probability_published": false,
+  "pre_kickoff_guard": {
+    "checked_at_utc": "2026-07-15T16:06:13Z",
+    "kickoff_utc": "2026-07-15T19:00:00Z",
+    "result": "PASS (guard satisfied - run was well before kickoff; failures below are unrelated to timing)"
+  },
+  "elo_capture_attempts": [
+    {
+      "attempt": 1,
+      "at_utc": "2026-07-15T16:06:20Z",
+      "command": "python3 capture_elo_evidence.py --tsv-out evidence/elo_sf102_20260715T1606Z_World.tsv --receipt-out evidence/elo_sf102_20260715T1606Z_receipt.json --timeout-seconds 30",
+      "exit_code": 2,
+      "error": "urlopen error Tunnel connection failed: 403 Forbidden",
+      "proxy_header": "X-Proxy-Error: blocked-by-allowlist",
+      "files_created": []
+    },
+    {
+      "attempt": 2,
+      "at_utc": "2026-07-15T16:06:45Z",
+      "command": "python3 capture_elo_evidence.py --tsv-out evidence/elo_sf102_20260715T1606Z_retry_World.tsv --receipt-out evidence/elo_sf102_20260715T1606Z_retry_receipt.json --timeout-seconds 30",
+      "exit_code": 2,
+      "error": "urlopen error Tunnel connection failed: 403 Forbidden",
+      "proxy_header": "X-Proxy-Error: blocked-by-allowlist",
+      "files_created": []
+    }
+  ],
+  "control_diagnostics": [
+    {
+      "target": "https://example.com",
+      "method": "curl -v",
+      "at_utc": "2026-07-15T16:06:50Z",
+      "result": "HTTP/1.1 403 Forbidden, X-Proxy-Error: blocked-by-allowlist (via CONNECT tunnel to localhost:3128)"
+    },
+    {
+      "target": "https://www.eloratings.net/World.tsv",
+      "method": "curl -v",
+      "at_utc": "2026-07-15T16:06:50Z",
+      "result": "HTTP/1.1 403 Forbidden, X-Proxy-Error: blocked-by-allowlist (identical signature to control)"
+    },
+    {
+      "target": "https://api.weather.gov/points/33.7554,-84.4008",
+      "method": "curl -v",
+      "at_utc": "2026-07-15T16:06:58Z",
+      "result": "HTTP/1.1 403 Forbidden, X-Proxy-Error: blocked-by-allowlist (identical signature to control)"
+    }
+  ],
+  "weather_evidence_attempt": {
+    "primary_source": "https://api.weather.gov/points/33.7554,-84.4008",
+    "in_sandbox_direct_http": "403 blocked-by-allowlist (see control_diagnostics)",
+    "workspace_web_fetch_tool": {
+      "at_utc": "2026-07-15T16:06:58Z",
+      "url": "https://api.weather.gov/points/33.7554,-84.4008",
+      "result": "returned no usable body (empty/placeholder output, no JSON payload, no generatedAt/properties fields) - treated as a failed capture, not as valid evidence"
+    },
+    "roof_status_evidence": "NOT OBTAINED - no official_roof source was reached; roof_status=closed cannot be asserted for weather_evidence_fixture_id=2026-SF102-England-Argentina",
+    "conclusion": "Neither the outdoor kickoff-hour weather path nor an official_roof confirmation could be validated in this run. This is recorded for the audit trail per the task's explicit instruction to still attempt weather/roof evidence collection even when the Elo path has already failed closed; it is a secondary, independent fail-closed condition (weather_evidence_missing_or_invalid), not the reason predictions were withheld (Elo capture failure alone already blocks the entire path)."
+  },
+  "diagnosis": "This isolated run's shell sandbox reaches the internet through an allowlisted egress proxy. Both https://www.eloratings.net and https://api.weather.gov are not on that allowlist as of this run (confirmed non-transient across two Elo attempts ~25s apart; a control request to https://example.com was also proxy-blocked with the identical X-Proxy-Error: blocked-by-allowlist header, indicating a restrictive default allowlist rather than a site-specific outage). This is a recurrence of the identical condition observed in the 2026-07-15 07:05Z daily run (see memory: 'Elo capture 403 blocked-by-allowlist AGAIN 7/15 07:05Z') and in the 2026-07-14 16:05Z sf101 finalization run. capture_elo_evidence.py could not perform its mandated direct_http_response_body capture (urlopen against OFFICIAL_ELO_SOURCE with HTTP 200 + exact final-URL check). No TSV or receipt file was created by either Elo attempt. The workspace web_fetch tool, used only as a diagnostic/audit-trail attempt on the weather path (per this task's own instructions), also produced no usable content for the api.weather.gov endpoint.",
+  "explicitly_not_done": [
+    "Did NOT fetch World.tsv content via any alternate tool (e.g. general-purpose web fetch) and write it into an evidence file, because that would fabricate a capture_method=direct_http_response_body receipt for bytes that were not actually captured by the sanctioned direct-HTTP path.",
+    "Did NOT proceed to context template / market population / validate_context / run_tests / predict_jul11.py finalize steps, since the fail-closed contract requires stopping the entire official prediction path on Elo capture failure.",
+    "Did NOT substitute estimated Elo ratings or previously known cached values as a stand-in for a fresh capture.",
+    "Did NOT assert weather_decision=indoor_no_weather without a retained official_roof source explicitly confirming roof_status=closed for this fixture; no such source was obtained.",
+    "Did NOT create or overwrite any evidence/sf102_*.final.json artifact."
+  ],
+  "recommended_action": "Fix the egress proxy allowlist to permit www.eloratings.net and api.weather.gov before 2026-07-15T19:00:00Z kickoff, then retry both the Elo capture and the weather/roof evidence capture from an environment with confirmed network access (or from the user's local machine). Approximately 2h53m of runway remained at the time of this report (16:07 UTC). If no successful capture occurs before kickoff, sf102 has no official artifact and must be recorded as a missed finalization, consistent with the sf101 (2026-07-14) and July 11 incident precedents in AUTOMATION_RUNBOOK.md. Both semifinals will then lack official pre-kickoff artifacts, which also means the w-grid refit gate (currently pending after both SFs are graded) will have no live_current_elo rows contributed by either finalization run - grading must instead rely on final scorelines and whatever market/context evidence is separately reconstructable post-match.",
+  "educational_analytical_use_only": true,
+  "no_betting_advice": true
+}
