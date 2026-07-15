@@ -48,6 +48,21 @@ REVIEW_GATE_N = 28
 SHADOW_DRAW_BOOST = 0.07
 
 
+def _ensemble_grid_lines(ensemble):
+    """Format every pre-registered grid point without changing production w."""
+    lines = []
+    for point in ensemble.grid:
+        marker = (
+            " [FROZEN PRODUCTION]"
+            if point.model_weight == ensemble.current_weight
+            else ""
+        )
+        lines.append(
+            f"      w={point.model_weight:.1f} Brier {point.brier:.4f}{marker}"
+        )
+    return tuple(lines)
+
+
 def res(hg, ag):
     return 0 if hg > ag else (1 if hg == ag else 2)
 
@@ -359,6 +374,9 @@ def main():
         print(f"    current w={ensemble.current_weight:.1f} Brier "
               f"{ensemble.current_brier:.4f} vs best w={ensemble.best_weight:.1f} "
               f"Brier {ensemble.best_brier:.4f}")
+        print("    diagnostic model-weight grid (review only; production remains frozen):")
+        for line in _ensemble_grid_lines(ensemble):
+            print(line)
     print("\nEducational/analytical use only; not betting advice.")
 
 

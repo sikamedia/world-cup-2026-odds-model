@@ -407,6 +407,15 @@ def main() -> None:
         _approx(twelve.best_brier, 0.04)
         assert twelve.current_brier > twelve.best_brier
         assert twelve.decision == "REVIEW_REFIT"
+        grid_lines = bt._ensemble_grid_lines(twelve)
+        assert len(grid_lines) == 11
+        assert [line.split()[0] for line in grid_lines] == [
+            f"w={index / 10:.1f}" for index in range(11)
+        ]
+        assert sum("[FROZEN PRODUCTION]" in line for line in grid_lines) == 1
+        assert "w=0.6" in next(
+            line for line in grid_lines if "[FROZEN PRODUCTION]" in line
+        )
 
         legacy = dict(rows[0])
         legacy["fav_side"] = legacy.pop("reference_side")
