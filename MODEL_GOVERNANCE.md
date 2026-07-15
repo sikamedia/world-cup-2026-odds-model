@@ -19,6 +19,10 @@ here and in the next generated report.
   `basis=live_current_elo` rows. At eligible n>=12 it reports a model-weight
   grid from 0.0 to 1.0 in 0.1 steps; `mixed_legacy` and counterfactual rows are
   excluded. The grid is a review output, not an automatic production refit.
+- Ensemble probabilities and `advanced_reference` are defined against
+  `reference_side` (`H` or `A`). Readers continue to accept the legacy ledger
+  field names `fav_side` and `advanced_fav`; the existing ledger header is not
+  rewritten. When both new and legacy fields are populated, they must agree.
 - `basis` records the Elo input basis; it does not certify that an official
   finalization artifact exists. The two July 11 QF preview rows remain eligible
   because they were frozen pre-match with current Elo and market inputs. Their
@@ -50,6 +54,12 @@ The cohort remains `MONITOR_ONLY` until 20 distinct eligible resolved fixtures.
 No single result, including a Belgium 90-minute win, can trigger an official or
 shadow parameter adjustment.
 
+SF1 and SF102 remain descriptive model-market disagreement observations. They
+do not enter this cohort unless every formal criterion above was frozen before
+kickoff. Reports must describe price movement or reported money flow neutrally;
+they must not infer recreational, sharp, or narrative-driven participants
+without independent evidence.
+
 ## Shootouts and home advantage
 
 - The structured shootout ledger currently contains four shootouts. The
@@ -65,9 +75,9 @@ shadow parameter adjustment.
 
 ## Current checkpoint
 
-- KO results are current through Argentina 3-1 Switzerland after extra time:
-  n=28. The 90-minute RPS is 0.1472; advancement Brier is 0.1606 and log-loss
-  is 0.4930.
+- KO results are current through Spain 2-0 France: n=29. The 90-minute RPS is
+  0.1478 and advancement Brier is 0.1604. The completed n=28 parameter review
+  remains the frozen decision checkpoint.
 - The paired graded-minus-flat-1.00 Brier delta is +0.0036 with 95% CI
   [-0.0044, +0.0116]. The n=28 gate is reached, but the interval crosses zero:
   `NO_DECISION`; graded-k stays frozen. Flat 1.00's retrospective Brier of
@@ -77,10 +87,10 @@ shadow parameter adjustment.
 - The draw-boost x floor interaction gate is reached. Its RPS interaction is
   +0.00003, so the diagnostic state is `REVIEW_INTERACTION` but the measured
   effect is negligible and production parameters remain frozen.
-- The ensemble ledger has 10 eligible `live_current_elo` rows out of 12 total;
+- The ensemble ledger has 11 eligible `live_current_elo` rows out of 13 total;
   one `mixed_legacy` and one counterfactual row are excluded. The n=12 grid has
-  not run, current w=0.6 Brier is 0.1635, and the state is `HOLD_W_0_6`. Two
-  further eligible settled rows open the diagnostic grid review, not an
+  not run, current w=0.6 Brier is 0.1726, and the state is `HOLD_W_0_6`. One
+  further eligible settled row opens the diagnostic grid review, not an
   automatic production refit.
 - The style ledger contains three observations across two fixtures, but zero
   formally eligible fixtures. Any reported "low-block side 4/4" sequence is a
@@ -101,6 +111,12 @@ shadow parameter adjustment.
   new applied-rain window.
 - The July 11 QFs had no isolated official finalization artifacts. Their ledger
   rows use the frozen 07:00 preview values and must remain labelled as such.
+- The July 14 17:18Z direct-HTTP Elo capture succeeded in a different network
+  environment. It does not prove that the scheduled-task sandbox allowlist was
+  restored.
+- The July 15 report's SF102 numbers reuse the prior day's Elo snapshot. For
+  governance purposes that run records no current daily preview; its published
+  numbers can only be treated as historical replay values.
 - A draw alert and a shootout forecast are separate outcomes. Norway-England's
   and Argentina-Switzerland's 90-minute draws count as alert hits; both were
   resolved in extra time, so `shootout_occurred=false` in each case.

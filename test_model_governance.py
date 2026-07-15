@@ -43,9 +43,10 @@ def _raises_value_error(callable_) -> None:
 
 def _write_ensemble(path: Path, rows: list[dict[str, str]]) -> None:
     fieldnames = [
-        "date", "stage", "home", "away", "fav_side", "p_model_currelo",
-        "p_market", "p_ensemble", "advanced_fav", "brier_model",
-        "brier_market", "brier_ensemble", "basis", "notes",
+        "date", "stage", "home", "away", "reference_side", "fav_side",
+        "p_model_currelo", "p_market", "p_ensemble", "advanced_reference",
+        "advanced_fav", "brier_model", "brier_market", "brier_ensemble",
+        "basis", "notes",
     ]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -59,11 +60,11 @@ def _ensemble_row(index: int, *, basis: str = "live_current_elo") -> dict[str, s
         "stage": "TEST",
         "home": f"Home {index}",
         "away": f"Away {index}",
-        "fav_side": "H",
+        "reference_side": "H",
         "p_model_currelo": "0.800",
         "p_market": "0.600",
         "p_ensemble": "0.700",
-        "advanced_fav": "1",
+        "advanced_reference": "1",
         "brier_model": "0.040",
         "brier_market": "0.160",
         "brier_ensemble": "0.090",
@@ -374,11 +375,18 @@ def main() -> None:
     assert ensemble.basis_counts["current_elo_counterfactual"] == 1
     assert ensemble.total_rows == ensemble.live_rows + 2
     assert ensemble.minimum_for_refit == 12
-    assert ensemble.decision == "HOLD_W_0_6"
     assert ensemble.current_weight == 0.6
     assert ensemble.current_brier is not None
-    assert ensemble.best_weight is None
-    assert ensemble.grid == ()
+    if ensemble.live_rows >= ensemble.minimum_for_refit:
+        assert ensemble.decision == "REVIEW_REFIT"
+        assert len(ensemble.grid) == 11
+        assert ensemble.best_weight is not None
+        assert ensemble.best_brier is not None
+    else:
+        assert ensemble.decision == "HOLD_W_0_6"
+        assert ensemble.best_weight is None
+        assert ensemble.best_brier is None
+        assert ensemble.grid == ()
 
     with TemporaryDirectory() as temp_dir:
         ledger = Path(temp_dir) / "ensemble.csv"
@@ -400,13 +408,29 @@ def main() -> None:
         assert twelve.current_brier > twelve.best_brier
         assert twelve.decision == "REVIEW_REFIT"
 
+        legacy = dict(rows[0])
+        legacy["fav_side"] = legacy.pop("reference_side")
+        legacy["advanced_fav"] = legacy.pop("advanced_reference")
+        _write_ensemble(ledger, [legacy])
+        assert summarize_ensemble_basis(ledger).live_rows == 1
+
+        conflicting_side = dict(rows[0])
+        conflicting_side["fav_side"] = "A"
+        _write_ensemble(ledger, [conflicting_side])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        conflicting_outcome = dict(rows[0])
+        conflicting_outcome["advanced_fav"] = "0"
+        _write_ensemble(ledger, [conflicting_outcome])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
         duplicate_row = dict(rows[0])
         duplicate_row["date"] = "2026-09-01"
         duplicate = [*rows[:12], duplicate_row]
         _write_ensemble(ledger, duplicate)
         _raises_value_error(lambda: summarize_ensemble_basis(ledger))
         pending = [dict(row) for row in rows[:12]]
-        pending[-1]["advanced_fav"] = "pending"
+        pending[-1]["advanced_reference"] = "pending"
         _write_ensemble(ledger, pending)
         _raises_value_error(lambda: summarize_ensemble_basis(ledger))
 

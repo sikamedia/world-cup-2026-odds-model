@@ -864,12 +864,36 @@ def summarize_ensemble_basis(
             raise ValueError(f"ensemble ledger line {line}: duplicate live fixture")
         fixture_keys.add(fixture_key)
 
-        if str(row.get("fav_side", "")).strip() not in {"H", "A"}:
-            raise ValueError(f"ensemble ledger line {line}: fav_side must be H or A")
-        outcome_raw = str(row.get("advanced_fav", "")).strip()
+        # ``fav_side`` is the legacy name.  The probabilities and outcome are
+        # defined against a reference side, which need not be the model's
+        # favourite when model and market disagree.
+        reference_side = str(row.get("reference_side", "")).strip()
+        legacy_side = str(row.get("fav_side", "")).strip()
+        if reference_side and legacy_side and reference_side != legacy_side:
+            raise ValueError(
+                f"ensemble ledger line {line}: reference_side conflicts "
+                "with legacy fav_side"
+            )
+        if not reference_side:
+            reference_side = legacy_side
+        if reference_side not in {"H", "A"}:
+            raise ValueError(
+                f"ensemble ledger line {line}: reference_side "
+                "(or legacy fav_side) must be H or A"
+            )
+        outcome_raw = str(row.get("advanced_reference", "")).strip()
+        legacy_outcome = str(row.get("advanced_fav", "")).strip()
+        if outcome_raw and legacy_outcome and outcome_raw != legacy_outcome:
+            raise ValueError(
+                f"ensemble ledger line {line}: advanced_reference conflicts "
+                "with legacy advanced_fav"
+            )
+        if not outcome_raw:
+            outcome_raw = legacy_outcome
         if outcome_raw not in {"0", "1"}:
             raise ValueError(
-                f"ensemble ledger line {line}: advanced_fav must be settled as 0 or 1"
+                f"ensemble ledger line {line}: reference outcome "
+                "(advanced_reference or legacy advanced_fav) must be settled as 0 or 1"
             )
         outcome = float(outcome_raw)
         p_model = _check_probability(
