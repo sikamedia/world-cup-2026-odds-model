@@ -39,6 +39,27 @@ roof will be closed, including roof_status=closed, the selected fixture's exact
 weather_evidence_fixture_id, snapshot, SHA-256, source URL, and a check within
 6 hours of kickoff. Without that confirmation, use the outdoor kickoff-hour
 weather path and fail closed if it cannot be validated.
+
+Weather evidence source policy (adopted 2026-07-15, user-directed): the PRIMARY
+outdoor-forecast source is the api.weather.gov JSON API, NOT the
+forecast.weather.gov HTML pages. Procedure: fetch
+https://api.weather.gov/points/{lat},{lon} for the venue, follow the exact
+`properties.forecastHourly` URL from that live response (never guess gridpoint
+numbers), select the kickoff-hour period, save the verbatim JSON body under
+evidence/ and record its SHA-256 as weather_evidence_sha256, with
+weather_forecast_issued_at_utc taken from the JSON's own
+generatedAt/updateTime/properties.updated fields. Rationale (2026-07-15 daily
+findings): forecast.weather.gov HTML pages arrive as STALE CACHES through the
+sandbox proxy (June issuances observed on match day) and must be rejected by
+the ≤24h issue-time check; the JSON API carries its own issuance timestamps so
+staleness is self-evident. Transport: prefer in-process HTTP capture; if the
+sandbox allowlist blocks api.weather.gov (403 blocked-by-allowlist, observed
+2026-07-15 07:05Z), the workspace web_fetch tool is acceptable FOR THE WEATHER
+PATH ONLY — the weather contract requires an auditable snapshot + SHA-256 +
+fresh timestamps, not the Elo-grade direct-capture receipt; the URL must be
+present in the scheduled task body for web_fetch provenance (same fix as the
+World.tsv task-body URL). Elo remains direct-capture-only; web_fetch can never
+satisfy the Elo contract.
 ```
 
 The URL appearing in a report or an interactive conversation does not update
