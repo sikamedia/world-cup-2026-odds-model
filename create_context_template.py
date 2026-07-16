@@ -32,9 +32,18 @@ SF_JUL14_15_FIXTURE_KEYS = {
     "france-spain": context_key("France", "Spain"),
     "england-argentina": context_key("England", "Argentina"),
 }
+FINALS_JUL18_19_FIXTURES = (
+    ("France", "England", "2026-07-18T21:00:00Z"),
+    ("Spain", "Argentina", "2026-07-19T19:00:00Z"),
+)
+FINALS_JUL18_19_FIXTURE_KEYS = {
+    "france-england": context_key("France", "England"),
+    "spain-argentina": context_key("Spain", "Argentina"),
+}
 FINALIZATION_FIXTURE_KEYS_BY_SOURCE = {
     "qf_jul11": QF_JUL11_FIXTURE_KEYS,
     "sf_jul14_15": SF_JUL14_15_FIXTURE_KEYS,
+    "finals_jul18_19": FINALS_JUL18_19_FIXTURE_KEYS,
 }
 
 
@@ -277,6 +286,24 @@ def _from_sf_jul14_15(market_method: str) -> dict:
     return matches
 
 
+def _from_finals_jul18_19(market_method: str) -> dict:
+    matches = {}
+    for home, away, kickoff_at_utc in FINALS_JUL18_19_FIXTURES:
+        _add_match(
+            matches,
+            home,
+            away,
+            notes=(
+                "3P/Final; schema 4; OPEN-AIR venue - outdoor kickoff-hour "
+                "weather evidence required (api.weather.gov points -> live "
+                "forecastHourly URL) before prediction"
+            ),
+            market_method=market_method,
+        )
+        matches[context_key(home, away)]["kickoff_at_utc"] = kickoff_at_utc
+    return matches
+
+
 def _from_split(split: str, market_method: str) -> dict:
     if split == "all":
         source = MATCHES_54
@@ -297,6 +324,7 @@ def main() -> None:
             "jun26",
             "qf_jul11",
             "sf_jul14_15",
+            "finals_jul18_19",
             "stryktipset",
             "train",
             "validation",
@@ -343,6 +371,8 @@ def main() -> None:
         matches = _from_qf_jul11(args.market_method)
     elif args.source == "sf_jul14_15":
         matches = _from_sf_jul14_15(args.market_method)
+    elif args.source == "finals_jul18_19":
+        matches = _from_finals_jul18_19(args.market_method)
     elif args.source == "stryktipset":
         matches = _from_stryktipset(args.include_existing_odds, args.market_method)
     else:

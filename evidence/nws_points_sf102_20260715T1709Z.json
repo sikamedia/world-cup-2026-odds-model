@@ -1,0 +1,112 @@
+{
+    "@context": [
+        "https://geojson.org/geojson-ld/geojson-context.jsonld",
+        {
+            "@version": "1.1",
+            "wx": "https://api.weather.gov/ontology#",
+            "s": "https://schema.org/",
+            "geo": "http://www.opengis.net/ont/geosparql#",
+            "unit": "http://codes.wmo.int/common/unit/",
+            "@vocab": "https://api.weather.gov/ontology#",
+            "geometry": {
+                "@id": "s:GeoCoordinates",
+                "@type": "geo:wktLiteral"
+            },
+            "city": "s:addressLocality",
+            "state": "s:addressRegion",
+            "distance": {
+                "@id": "s:Distance",
+                "@type": "s:QuantitativeValue"
+            },
+            "bearing": {
+                "@type": "s:QuantitativeValue"
+            },
+            "value": {
+                "@id": "s:value"
+            },
+            "unitCode": {
+                "@id": "s:unitCode",
+                "@type": "@id"
+            },
+            "forecastOffice": {
+                "@type": "@id"
+            },
+            "forecastGridData": {
+                "@type": "@id"
+            },
+            "publicZone": {
+                "@type": "@id"
+            },
+            "county": {
+                "@type": "@id"
+            }
+        }
+    ],
+    "id": "https://api.weather.gov/points/33.7554,-84.4008",
+    "type": "Feature",
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            -84.4008,
+            33.7554
+        ]
+    },
+    "properties": {
+        "@id": "https://api.weather.gov/points/33.7554,-84.4008",
+        "@type": "wx:Point",
+        "cwa": "FFC",
+        "type": "land",
+        "forecastOffice": "https://api.weather.gov/offices/FFC",
+        "gridId": "FFC",
+        "gridX": 50,
+        "gridY": 87,
+        "forecast": "https://api.weather.gov/gridpoints/FFC/50,87/forecast",
+        "forecastHourly": "https://api.weather.gov/gridpoints/FFC/50,87/forecast/hourly",
+        "forecastGridData": "https://api.weather.gov/gridpoints/FFC/50,87",
+        "observationStations": "https://api.weather.gov/gridpoints/FFC/50,87/stations",
+        "relativeLocation": {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    -84.4226745,
+                    33.7629088
+                ]
+            },
+            "properties": {
+                "city": "Atlanta",
+                "state": "GA",
+                "distance": {
+                    "unitCode": "wmoUnit:m",
+                    "value": 0
+                },
+                "bearing": {
+                    "unitCode": "wmoUnit:degree_(angle)",
+                    "value": 0
+                }
+            }
+        },
+        "forecastZone": "https://api.weather.gov/zones/forecast/GAZ033",
+        "county": "https://api.weather.gov/zones/county/GAC121",
+        "fireWeatherZone": "https://api.weather.gov/zones/fire/GAZ033",
+        "timeZone": "America/New_York",
+        "radarStation": "KFFC",
+        "astronomicalData": {
+            "sunrise": "2026-07-15T06:36:55-04:00",
+            "sunset": "2026-07-15T20:50:22-04:00",
+            "transit": "2026-07-15T13:43:38-04:00",
+            "civilTwilightBegin": "2026-07-15T06:09:58-04:00",
+            "civilTwilightEnd": "2026-07-15T21:17:18-04:00",
+            "nauticalTwilightBegin": "2026-07-15T05:35:21-04:00",
+            "nauticalTwilightEnd": "2026-07-15T21:51:56-04:00",
+            "astronomicalTwilightBegin": "2026-07-15T04:57:56-04:00",
+            "astronomicalTwilightEnd": "2026-07-15T22:29:20-04:00"
+        },
+        "nwr": {
+            "transmitter": "KEC80",
+            "sameCode": "013121",
+            "areaBroadcast": "https://api.weather.gov/radio/KEC80/broadcast",
+            "pointBroadcast": "https://api.weather.gov/points/33.7554,-84.4008/radio"
+        }
+    }
+}

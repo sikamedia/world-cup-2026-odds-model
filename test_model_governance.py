@@ -560,7 +560,11 @@ def main() -> None:
     assert ensemble.live_rows >= 6
     assert ensemble.basis_counts["mixed_legacy"] == 1
     assert ensemble.basis_counts["current_elo_counterfactual"] == 1
-    assert ensemble.total_rows == ensemble.live_rows + 2
+    # SF102 (2026-07-15) is recorded fail-closed as post_policy_no_freeze:
+    # settled and visible, but permanently ineligible for the w refit because
+    # no compliant pre-match freeze/artifact exists for it.
+    assert ensemble.basis_counts.get("post_policy_no_freeze", 0) == 1
+    assert ensemble.total_rows == ensemble.live_rows + 3
     assert ensemble.minimum_for_refit == 12
     assert ensemble.current_weight == 0.6
     assert ensemble.current_brier is not None

@@ -125,6 +125,26 @@ FIXTURES = {
             "Argentina",
             "2026-07-15T19:00:00Z",
         ),
+        # Registered 2026-07-16 after SF102 settled (runbook: real participants
+        # only). 3P France-England, Hard Rock Stadium Miami Gardens (open-air),
+        # 17:00 ET; Final Spain-Argentina, MetLife East Rutherford (OPEN-AIR,
+        # no roof - outdoor weather path mandatory), 15:00 ET. Schema 4.
+        Fixture(
+            "france-england",
+            "2026-3P103-France-England",
+            "third_place",
+            "France",
+            "England",
+            "2026-07-18T21:00:00Z",
+        ),
+        Fixture(
+            "spain-argentina",
+            "2026-F104-Spain-Argentina",
+            "final",
+            "Spain",
+            "Argentina",
+            "2026-07-19T19:00:00Z",
+        ),
     )
 }
 QF_FIXTURES = tuple(fixture for fixture in FIXTURES.values() if fixture.stage == "quarterfinal")
