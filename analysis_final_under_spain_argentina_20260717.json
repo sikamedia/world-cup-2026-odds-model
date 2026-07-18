@@ -1,0 +1,331 @@
+{
+  "title": "Spain vs Argentina — World Cup 2026 Final Under (小球) deep-dive",
+  "as_of_utc": "2026-07-17T17:20:00Z",
+  "fixture": {
+    "id": "2026-F104-Spain-Argentina",
+    "kickoff_utc": "2026-07-19T19:00:00Z",
+    "kickoff_local": "2026-07-19 15:00 ET",
+    "venue": "MetLife Stadium (outdoor, East Rutherford NJ)",
+    "stage": "final",
+    "home": "Spain",
+    "away": "Argentina",
+    "neutral": true
+  },
+  "primary_question": "Under 球数详细分析 — Under 0.5 / 1.5 / 2.5 / 3.5 / 4.5 (90′)",
+  "verdict": {
+    "lean": "Under 2.5 is the majority path; market more Under-heavy than model",
+    "model_under_25_pct": 54.8,
+    "market_under_25_pct": 60.0,
+    "ensemble_under_25_pct": 56.9,
+    "expected_goals_total": 2.57,
+    "mode_total_goals": 2,
+    "summary_zh": "热度 mild 下 Σλ=2.57；模型 Under 2.5=54.8%（市场去水 60.0%，集成 56.9%）。总进球众数在 2 球（27.7%）；U2.5 质量约一半来自恰好 2 球，其中 1-1 单独贡献 16.1%。市场在各有报价的小球线（1.5/2.5/3.5）上均比模型更偏 Under 约 5–6.5pt。"
+  },
+  "disclaimer": "Educational/analytical use only; not betting advice. / 教育/分析用途，不构成投注建议。",
+  "scope": {
+    "clock": "90 minutes only — regulation totals; ET goals excluded from O/U",
+    "related_ou_artifact": "analysis_final_ou_spain_argentina_20260717.json",
+    "related_podium": "analysis_podium_20260717.json"
+  },
+  "inputs": {
+    "elo": {
+      "source": "https://www.eloratings.net/World.tsv",
+      "receipt": "evidence/elo_receipt_20260717T0705Z.json",
+      "module": "elo_current_20260717.py",
+      "fetched_at_utc": "2026-07-17T07:05:10Z",
+      "Spain": 2232,
+      "Argentina": 2200,
+      "delta_elo": 32,
+      "E_home": 0.546
+    },
+    "weather": {
+      "source": "api.weather.gov hourly snapshot",
+      "evidence": "evidence/nws_hourly_f104_20260717T0705Z.json",
+      "kickoff_hour": "2026-07-19T15:00:00-04:00",
+      "temperature_f": 82,
+      "rh_pct": 47,
+      "pop_pct": 0,
+      "short_forecast": "Sunny",
+      "decision": "heat_mild_sensitivity",
+      "weather_scale": 0.95,
+      "note": "Primary sensitivity heat_mild ×0.95; official outdoor_no_adjust possible until T-6h re-check"
+    },
+    "lineups_injuries": {
+      "Spain": {
+        "confirmed_out": ["Yeremy Pino (collarbone/AC)", "Víctor Muñoz (calf)"],
+        "notes": "No key-XI λ cut (depth / not official starters). Yamal hamstring managed — no λ adjust. Rodri fit."
+      },
+      "Argentina": {
+        "doubt": ["Facundo Medina (calf — missed recent KOs)"],
+        "notes": "Messi fit after facial knock. No confirmed key-attacker absence → no λ adjust."
+      },
+      "lambda_adjust_applied": false
+    },
+    "rest_fatigue": {
+      "Spain_SF": "2026-07-14 vs France 2-0 (90′)",
+      "Argentina_SF": "2026-07-15 vs England (dramatic KO; ET risk disclosed)",
+      "rest_days_to_final": {"Spain": 5, "Argentina": 4},
+      "model_treatment": "Disclosed only — not stacked on λ (Discipline A; market already prices grind/final caginess)"
+    },
+    "market": {
+      "source": "FanDuel Research article odds board (scraped / refreshed 2026-07-17)",
+      "url": "https://www.fanduel.com/research/spain-vs-argentina-world-cup-final-prediction-odds-preview-lineups-and-best-bets",
+      "moneyline_90_decimal": {"Spain": 2.3, "Draw": 2.9, "Argentina": 3.7},
+      "ou_full_match_american": {
+        "1.5": {"Over": -230, "Under": 184},
+        "2.5": {"Over": 138, "Under": -170},
+        "3.5": {"Over": 370, "Under": -520}
+      },
+      "ou_full_match_decimal": {
+        "1.5": {"Over": 1.435, "Under": 2.84},
+        "2.5": {"Over": 2.38, "Under": 1.588},
+        "3.5": {"Over": 4.7, "Under": 1.192}
+      },
+      "ou_0_5_note": "FanDuel −180 / +140 is 1st-half O/U 0.5, NOT full-match 0.5 — excluded from FT model-vs-market gaps",
+      "ou_4_5_note": "Full-match O/U 4.5 not listed on FanDuel board snapshot — model-only"
+    }
+  },
+  "engine": {
+    "profile": "knockout",
+    "avg_goals": 2.7,
+    "gd_per_100": 0.65,
+    "draw_boost": 0.06,
+    "dixon_coles_rho": -0.05,
+    "lambda_floor": 0.3,
+    "bookmaker_margin_default": 0.05,
+    "ensemble_w_model": 0.6,
+    "script": "football-odds-model/scripts/match_model.py --elo 2232 2200 --stage knockout --heat mild"
+  },
+  "formulas": {
+    "elo_expectation": "E = 1/(1+10^(-ΔElo/400)) = 1/(1+10^(-32/400)) ≈ 0.546",
+    "gd": "GD ≈ (ΔElo/100) × 0.65 = 0.32 × 0.65 = 0.208",
+    "lambdas_raw": "λ_ESP = 2.70/2 + 0.208/2 = 1.454; λ_ARG = 2.70/2 − 0.208/2 = 1.246; floor 0.30 inactive",
+    "heat_mild": "λ' = λ × 0.95 → ESP 1.381 / ARG 1.184; Σλ = 2.565",
+    "poisson_dc": "P(i,j) ∝ Pois(i;λ_h)·Pois(j;λ_a)·τ_DC(ρ=-0.05); then draw_boost 0.06 on diagonal; renormalize",
+    "under_line": "Under X.5 = Σ P(total goals ≤ X)",
+    "market_demargin": "p_i = (1/odds_i) / Σ(1/odds)  (proportional)",
+    "fair_odds": "odds_fair = 1 / p",
+    "offered_odds": "odds_offered = 1 / (p × 1.05)",
+    "ensemble": "p_ens = 0.6 × p_model + 0.4 × p_market"
+  },
+  "expected_goals": {
+    "primary_heat_mild": {
+      "Spain": 1.38,
+      "Argentina": 1.18,
+      "total": 2.57
+    },
+    "raw_no_weather": {
+      "Spain": 1.45,
+      "Argentina": 1.25,
+      "total": 2.7
+    },
+    "venue_adjust": "neutral — no home Elo bump",
+    "injury_adjust": "none (official-ruling rule)"
+  },
+  "total_goals_distribution_pct": {
+    "0": 10.1,
+    "1": 16.9,
+    "2": 27.7,
+    "3": 19.8,
+    "4": 14.3,
+    "5": 6.5,
+    "6plus": 4.6,
+    "5plus": 11.1,
+    "cumulative_under": {
+      "0.5": 10.1,
+      "1.5": 27.1,
+      "2.5": 54.8,
+      "3.5": 74.6,
+      "4.5": 88.9
+    },
+    "note": "P(6+) ≈ 4.6% so that P(5)+P(6+)=11.1% = P(5+); rounding to 1 dp"
+  },
+  "under_lines": {
+    "0.5": {
+      "model_under_pct": 10.1,
+      "model_over_pct": 89.9,
+      "fair_odds": {"Under": 9.88, "Over": 1.11},
+      "offered_5pct_odds": {"Under": 9.41, "Over": 1.06},
+      "market_demargined_pct": null,
+      "ensemble_under_pct": null,
+      "gap_model_minus_market_under_pt": null,
+      "market_note": "Full-match 0.5 not on FanDuel FT board; listed −180/+140 is 1H O/U 0.5 only"
+    },
+    "1.5": {
+      "model_under_pct": 27.1,
+      "model_over_pct": 72.9,
+      "fair_odds": {"Under": 3.7, "Over": 1.37},
+      "offered_5pct_odds": {"Under": 3.52, "Over": 1.31},
+      "market_demargined_pct": {"Under": 33.6, "Over": 66.4},
+      "market_overround_pct": 4.9,
+      "ensemble_under_pct": 29.7,
+      "gap_model_minus_market_under_pt": -6.5
+    },
+    "2.5": {
+      "model_under_pct": 54.8,
+      "model_over_pct": 45.2,
+      "fair_odds": {"Under": 1.82, "Over": 2.21},
+      "offered_5pct_odds": {"Under": 1.74, "Over": 2.11},
+      "market_demargined_pct": {"Under": 60.0, "Over": 40.0},
+      "market_overround_pct": 5.0,
+      "ensemble_under_pct": 56.9,
+      "gap_model_minus_market_under_pt": -5.2
+    },
+    "3.5": {
+      "model_under_pct": 74.6,
+      "model_over_pct": 25.4,
+      "fair_odds": {"Under": 1.34, "Over": 3.94},
+      "offered_5pct_odds": {"Under": 1.28, "Over": 3.76},
+      "market_demargined_pct": {"Under": 79.8, "Over": 20.2},
+      "market_overround_pct": 5.1,
+      "ensemble_under_pct": 76.7,
+      "gap_model_minus_market_under_pt": -5.2
+    },
+    "4.5": {
+      "model_under_pct": 88.9,
+      "model_over_pct": 11.1,
+      "fair_odds": {"Under": 1.12, "Over": 9.01},
+      "offered_5pct_odds": {"Under": 1.07, "Over": 8.58},
+      "market_demargined_pct": null,
+      "ensemble_under_pct": null,
+      "gap_model_minus_market_under_pt": null,
+      "market_note": "Full-match 4.5 not listed on FanDuel board snapshot"
+    }
+  },
+  "score_matrix_under_drivers": {
+    "under_2_5_scores": [
+      {"score": "1-1", "pct": 16.1, "goals": 2, "share_of_under_25_pct": 29.4},
+      {"score": "0-0", "pct": 10.1, "goals": 0, "share_of_under_25_pct": 18.4},
+      {"score": "1-0", "pct": 9.2, "goals": 1, "share_of_under_25_pct": 16.8},
+      {"score": "0-1", "pct": 7.8, "goals": 1, "share_of_under_25_pct": 14.2},
+      {"score": "2-0", "pct": 6.7, "goals": 2, "share_of_under_25_pct": 12.2},
+      {"score": "0-2", "pct": 4.9, "goals": 2, "share_of_under_25_pct": 8.9}
+    ],
+    "under_1_5_scores": [
+      {"score": "0-0", "pct": 10.1, "goals": 0},
+      {"score": "1-0", "pct": 9.2, "goals": 1},
+      {"score": "0-1", "pct": 7.8, "goals": 1}
+    ],
+    "under_0_5_scores": [
+      {"score": "0-0", "pct": 10.1, "goals": 0}
+    ],
+    "u25_composition_by_goal_count_pct": {
+      "0": 10.1,
+      "1": 16.9,
+      "2": 27.7
+    },
+    "u25_composition_share_of_under": {
+      "0": 18.5,
+      "1": 30.9,
+      "2": 50.6
+    },
+    "draw_scores_in_u25_pct": 26.2,
+    "draw_share_of_u25_pct": 47.8,
+    "interpretation": "Under 2.5 is driven first by exact-2 mass (esp. 1-1), then one-goal games, then 0-0. Nearly half of U2.5 probability is draw scorelines 0-0 + 1-1."
+  },
+  "top_scores_all": [
+    {"score": "1-1", "pct": 16.1, "goals": 2, "bucket": "Under 2.5"},
+    {"score": "0-0", "pct": 10.1, "goals": 0, "bucket": "Under 0.5 / 1.5 / 2.5"},
+    {"score": "1-0", "pct": 9.2, "goals": 1, "bucket": "Under 1.5 / 2.5"},
+    {"score": "2-1", "pct": 8.0, "goals": 3, "bucket": "Over 2.5 / Under 3.5"},
+    {"score": "0-1", "pct": 7.8, "goals": 1, "bucket": "Under 1.5 / 2.5"},
+    {"score": "1-2", "pct": 6.8, "goals": 3, "bucket": "Over 2.5 / Under 3.5"},
+    {"score": "2-0", "pct": 6.7, "goals": 2, "bucket": "Under 2.5"},
+    {"score": "2-2", "pct": 6.3, "goals": 4, "bucket": "Over 3.5 / Under 4.5"}
+  ],
+  "wdl_90_context": {
+    "model_pct": {"Spain": 37.4, "Draw": 33.7, "Argentina": 28.9},
+    "market_demargined_pct": {"Spain": 41.4, "Draw": 32.8, "Argentina": 25.7},
+    "fair_odds": {"Spain": 2.67, "Draw": 2.97, "Argentina": 3.46},
+    "offered_5pct_odds": {"Spain": 2.55, "Draw": 2.83, "Argentina": 3.3},
+    "tipset_pick": "X (draw / coin-flip)",
+    "interaction_with_under": "Model draw 33.7% sits inside Under paths: 0-0 + 1-1 alone = 26.2 ppt. A cagey final that lands on 1-1 or 0-0 is simultaneously a draw-lean and Under 2.5 driver; Over 2.5 needs the thinner 3+ goal mass (45.2%).",
+    "btts_yes_pct": 54.0,
+    "advance_pct": {"Spain": 53.4, "Argentina": 46.6, "k_eff": 0.73}
+  },
+  "sensitivity": {
+    "heat_mild_primary": {
+      "lambda_total": 2.57,
+      "under_pct": {
+        "0.5": 10.1,
+        "1.5": 27.1,
+        "2.5": 54.8,
+        "3.5": 74.6,
+        "4.5": 88.9
+      }
+    },
+    "no_heat": {
+      "note": "If official weather_decision = outdoor_no_adjust",
+      "lambda_total": 2.7,
+      "under_pct": {
+        "0.5": 9.0,
+        "1.5": 24.5,
+        "2.5": 51.5,
+        "3.5": 71.7,
+        "4.5": 87.0
+      },
+      "delta_u25_vs_primary_pt": -3.3
+    },
+    "rest_fatigue_disclosure": {
+      "Spain_rest_days": 5,
+      "Argentina_rest_days": 4,
+      "stacked_on_lambda": false,
+      "reason": "Discipline A — market already prices final grind / Argentina KO workload; do not double-cut"
+    }
+  },
+  "market_demargined": {
+    "method": "proportional",
+    "1X2_pct": {"Spain": 41.4, "Draw": 32.8, "Argentina": 25.7, "overround_pct": 5.0},
+    "ou_under_pct": {
+      "1.5": 33.6,
+      "2.5": 60.0,
+      "3.5": 79.8
+    }
+  },
+  "calibration": {
+    "headline_u25": {
+      "model_under_pct": 54.8,
+      "market_under_pct": 60.0,
+      "ensemble_under_pct": 56.9,
+      "gap_model_minus_market_pt": -5.2,
+      "interpretation": "Both price Under as majority; market ~5pt more Under-heavy than Elo-Poisson. Same directional gap on 1.5 (−6.5) and 3.5 (−5.2)."
+    }
+  },
+  "divergence_analysis": [
+    {
+      "channel": "Under 2.5",
+      "gap_pt": -5.2,
+      "model_side": "less Under (relatively more Over) than market",
+      "likely_cause": "Market prices Spain tournament defensive record (many clean sheets) + World Cup final low-tempo prior harder than knockout avg_goals=2.70 baseline; soft boards also lean U2.5 (−170)",
+      "discipline_a": "Do not stack Argentina ET/fatigue or extra heat on top of market — decide information gap; lean ensemble Under 56.9% when |gap|>4pt"
+    },
+    {
+      "channel": "Under 1.5",
+      "gap_pt": -6.5,
+      "model_side": "less Under than market",
+      "likely_cause": "Same defensive/final-caginess narrative; market assigns more mass to 0–1 goal games than DC+draw_boost Poisson"
+    },
+    {
+      "channel": "1X2 cup (context)",
+      "gap_pt": -5.6,
+      "model_side": "Argentina advancement vs Spain market favourite",
+      "likely_cause": "Separate narrative-money channel on Spain to lift cup — not the same as totals, but both show soft-book Spain premium"
+    }
+  ],
+  "assumptions": [
+    "Neutral venue — no home Elo bump",
+    "Knockout profile avg_goals=2.70 (not group 2.90)",
+    "Primary λ uses heat_mild ×0.95 from NWS 82°F kickoff-hour snapshot; T-6h may flip to no_adjust",
+    "No confirmed lineup λ adjustments",
+    "O/U markets are 90-minute totals; ET excluded",
+    "Full-match Under 0.5 / 4.5 are model-only (no FT market on FanDuel snapshot)",
+    "FanDuel board treated as market proxy (≥2-book ideal; press boards show similar U2.5 favourite)"
+  ],
+  "uncertainty": "Single-match football ±5 ppt model error is normal; early red card / penalty voids the distribution. O/U Brier on tournament sample ~0.25 — totals are noisy.",
+  "artifacts": {
+    "canvas": "/Users/twan/.cursor/projects/Users-twan-Documents-Claude-Projects-world-cup-2026/canvases/wc2026-final-under-spain-argentina.canvas.tsx",
+    "related_ou_canvas": "/Users/twan/.cursor/projects/Users-twan-Documents-Claude-Projects-world-cup-2026/canvases/wc2026-final-ou-spain-argentina.canvas.tsx",
+    "related_ou_json": "analysis_final_ou_spain_argentina_20260717.json",
+    "related_podium": "analysis_podium_20260717.json"
+  }
+}
