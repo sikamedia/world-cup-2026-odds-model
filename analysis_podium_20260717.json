@@ -1,0 +1,184 @@
+{
+  "title": "2026 FIFA World Cup podium outright",
+  "as_of_utc": "2026-07-17T07:05:10Z",
+  "scope": "final_four_from_here",
+  "disclaimer": "Educational/analytical use only; not betting advice.",
+  "remaining_fixtures": {
+    "third_place": {
+      "id": "2026-3P103-France-England",
+      "kickoff_utc": "2026-07-18T21:00:00Z",
+      "venue": "Hard Rock Stadium (outdoor)",
+      "home": "France",
+      "away": "England"
+    },
+    "final": {
+      "id": "2026-F104-Spain-Argentina",
+      "kickoff_utc": "2026-07-19T19:00:00Z",
+      "venue": "MetLife Stadium (outdoor)",
+      "home": "Spain",
+      "away": "Argentina"
+    }
+  },
+  "elo": {
+    "source": "https://www.eloratings.net/World.tsv",
+    "receipt": "evidence/elo_receipt_20260717T0705Z.json",
+    "module": "elo_current_20260717.py",
+    "ratings": {
+      "Spain": 2232,
+      "Argentina": 2200,
+      "France": 2121,
+      "England": 2074
+    }
+  },
+  "engine": {
+    "profile": "knockout",
+    "avg_goals": 2.7,
+    "gd_per_100": 0.65,
+    "draw_boost": 0.06,
+    "lambda_floor": 0.3,
+    "ko_regress": "graded 0.70→1.00 over |ΔElo|/350",
+    "pen_tilt": 0.2,
+    "ensemble_w_model": 0.6,
+    "bookmaker_margin_default": 0.05
+  },
+  "formulas": {
+    "elo_expectation": "E = 1 / (1 + 10^(-ΔElo/400))",
+    "gd": "GD ≈ (ΔElo/100) × gd_per_100",
+    "lambdas": "λ_h = avg_goals/2 + GD/2; λ_a = avg_goals/2 - GD/2; floor 0.30",
+    "k_eff": "k_eff = 0.70 + 0.30 × min(1, |ΔElo|/350)",
+    "fair_odds": "odds_fair = 1 / p",
+    "offered_odds": "odds_offered = 1 / (p × (1 + margin))",
+    "market_demargin": "p_i = (1/odds_i) / Σ(1/odds)",
+    "ensemble": "p_ens = 0.6 × p_model + 0.4 × p_market",
+    "runner_up": "P(runner_up | finalist) = 1 - P(champion)"
+  },
+  "match_models": {
+    "final_heat_mild": {
+      "delta_elo": 32,
+      "E_home": 0.546,
+      "lambda_raw": [1.45, 1.25],
+      "lambda_adj": [1.38, 1.18],
+      "k_eff": 0.73,
+      "wdl_90": { "home": 37.4, "draw": 33.7, "away": 28.9 },
+      "advance": { "Spain": 53.4, "Argentina": 46.6 },
+      "top_scores": [
+        { "score": "1-1", "pct": 16.1 },
+        { "score": "0-0", "pct": 10.1 },
+        { "score": "1-0", "pct": 9.2 }
+      ]
+    },
+    "third_place_heat_moderate": {
+      "delta_elo": 47,
+      "E_home": 0.567,
+      "lambda_raw": [1.5, 1.2],
+      "lambda_adj": [1.38, 1.1],
+      "k_eff": 0.74,
+      "wdl_90": { "home": 39.1, "draw": 34.0, "away": 26.8 },
+      "advance": { "France": 55.0, "England": 45.0 }
+    }
+  },
+  "market": {
+    "final_cup_two_way": {
+      "source": "FanDuel American -156 / +136",
+      "decimal_odds": { "Spain": 1.641, "Argentina": 2.36 },
+      "overround_pct": 3.3,
+      "demargin_pct": { "Spain": 59.0, "Argentina": 41.0 }
+    },
+    "third_place_two_way": {
+      "source": "FanDuel American -205 / +164",
+      "decimal_odds": { "France": 1.4878, "England": 2.64 },
+      "overround_pct": 5.1,
+      "demargin_pct": { "France": 64.0, "England": 36.0 }
+    }
+  },
+  "podium": {
+    "champion": [
+      {
+        "team": "Spain",
+        "model_pct": 53.4,
+        "market_pct": 59.0,
+        "ensemble_pct": 55.6,
+        "fair_odds": 1.87,
+        "offered_5pct": 1.78,
+        "gap_model_minus_market_pt": -5.6
+      },
+      {
+        "team": "Argentina",
+        "model_pct": 46.6,
+        "market_pct": 41.0,
+        "ensemble_pct": 44.4,
+        "fair_odds": 2.15,
+        "offered_5pct": 2.04,
+        "gap_model_minus_market_pt": 5.6
+      }
+    ],
+    "runner_up": [
+      {
+        "team": "Argentina",
+        "model_pct": 53.4,
+        "market_pct": 59.0,
+        "ensemble_pct": 55.6,
+        "fair_odds": 1.87,
+        "offered_5pct": 1.78,
+        "note": "equals P(Spain champion)"
+      },
+      {
+        "team": "Spain",
+        "model_pct": 46.6,
+        "market_pct": 41.0,
+        "ensemble_pct": 44.4,
+        "fair_odds": 2.15,
+        "offered_5pct": 2.04,
+        "note": "equals P(Argentina champion)"
+      }
+    ],
+    "third_place": [
+      {
+        "team": "France",
+        "model_pct": 55.0,
+        "market_pct": 64.0,
+        "ensemble_pct": 58.6,
+        "fair_odds": 1.82,
+        "offered_5pct": 1.73,
+        "gap_model_minus_market_pt": -9.0
+      },
+      {
+        "team": "England",
+        "model_pct": 45.0,
+        "market_pct": 36.0,
+        "ensemble_pct": 41.4,
+        "fair_odds": 2.22,
+        "offered_5pct": 2.12,
+        "gap_model_minus_market_pt": 9.0
+      }
+    ]
+  },
+  "divergence_analysis": [
+    {
+      "fixture": "final",
+      "gap_pt": 5.6,
+      "model_side": "Argentina",
+      "likely_cause": "narrative-money / soft book overround on Spain; pattern matches SF1/SF2 where model side was correct 6/6 closed large-gap cases",
+      "discipline_a": "do not stack rest/fatigue on top of market without deciding which source is missing info"
+    },
+    {
+      "fixture": "third_place",
+      "gap_pt": 9.0,
+      "model_side": "England",
+      "likely_cause": "asymmetric rotation not in Elo model (England expected heavy rotation; France keep Mbappé attack; Saliba out)",
+      "discipline_a": "treat as model missing information; lean market/ensemble until confirmed XIs"
+    }
+  ],
+  "assumptions": [
+    "Only four teams remain; podium = final winner/loser + 3P winner",
+    "Neutral venues — no host-nation Elo bump for USA/Canada/Mexico",
+    "Heat adjustments are preview sensitivity from NWS 07:05Z; official needs T-6h evidence",
+    "No confirmed lineup λ adjustments (rumours excluded)",
+    "3P historical high-rotation / open-game effects not fitted (single-game sample)"
+  ],
+  "uncertainty": "Single-match football ±5 ppt model error is normal; red card / early penalty voids the distribution.",
+  "artifacts": {
+    "canvas": "/Users/twan/.cursor/projects/Users-twan-Documents-Claude-Projects-world-cup-2026/canvases/wc2026-podium-outright.canvas.tsx",
+    "daily_note": "2026世界杯_回测与改进建议_到7月17日.md"
+  }
+}

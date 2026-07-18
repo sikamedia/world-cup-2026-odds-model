@@ -1,0 +1,213 @@
+{
+  "title": "Spain vs Argentina — World Cup 2026 Final Over/Under (大球)",
+  "as_of_utc": "2026-07-17T17:05:00Z",
+  "fixture": {
+    "id": "2026-F104-Spain-Argentina",
+    "kickoff_utc": "2026-07-19T19:00:00Z",
+    "kickoff_local": "2026-07-19 15:00 ET",
+    "venue": "MetLife Stadium (outdoor, East Rutherford NJ)",
+    "stage": "final",
+    "home": "Spain",
+    "away": "Argentina",
+    "neutral": true
+  },
+  "primary_question": "会有大球吗？ — Over/Under 2.5 (90')",
+  "verdict": {
+    "lean": "Under 2.5 more likely than Over",
+    "model_over_25_pct": 45.2,
+    "market_over_25_pct": 40.0,
+    "ensemble_over_25_pct": 43.1,
+    "expected_goals_total": 2.57,
+    "summary_zh": "模型 Over 2.5 = 45.2%（Under 54.8%），市场去水 Over = 40.0%。预期总进球 λ合计 2.57；最可能比分 1-1 / 0-0 / 1-0。结论：大球并非多数结果，小球侧概率更高；模型比市场更偏大球约 +5.2pt。"
+  },
+  "disclaimer": "Educational/analytical use only; not betting advice. / 教育/分析用途，不构成投注建议。",
+  "inputs": {
+    "elo": {
+      "source": "https://www.eloratings.net/World.tsv",
+      "receipt": "evidence/elo_receipt_20260717T0705Z.json",
+      "module": "elo_current_20260717.py",
+      "fetched_at_utc": "2026-07-17T07:05:10Z",
+      "Spain": 2232,
+      "Argentina": 2200,
+      "delta_elo": 32,
+      "E_home": 0.546
+    },
+    "weather": {
+      "source": "api.weather.gov hourly snapshot",
+      "evidence": "evidence/nws_hourly_f104_20260717T0705Z.json",
+      "kickoff_hour": "2026-07-19T15:00:00-04:00",
+      "temperature_f": 82,
+      "rh_pct": 47,
+      "pop_pct": 0,
+      "short_forecast": "Sunny",
+      "decision": "heat_mild_sensitivity",
+      "weather_scale": 0.95,
+      "note": "Daily note: mild, likely no official weather adjust until T-6h re-check; podium used heat_mild. Presented as primary sensitivity."
+    },
+    "lineups_injuries": {
+      "Spain": {
+        "confirmed_out": ["Yeremy Pino (collarbone/AC)", "Víctor Muñoz (calf)"],
+        "notes": "No key-XI λ cut (depth / not official starters). Yamal hamstring managed — rumour/managed, no λ adjust. Rodri fit."
+      },
+      "Argentina": {
+        "doubt": ["Facundo Medina (calf — missed recent KOs)"],
+        "notes": "Messi fit after facial knock. No confirmed key-attacker absence → no λ adjust (official-ruling rule)."
+      },
+      "lambda_adjust_applied": false
+    },
+    "rest_fatigue": {
+      "Spain_SF": "2026-07-14 vs France 2-0 (90')",
+      "Argentina_SF": "2026-07-15 vs England (dramatic KO; ET risk disclosed)",
+      "rest_days_to_final": {"Spain": 5, "Argentina": 4},
+      "model_treatment": "Disclosed only — not stacked on λ (Discipline A; market already prices grind/final caginess)"
+    },
+    "market": {
+      "source": "FanDuel Research article odds board (scraped 2026-07-17)",
+      "url": "https://www.fanduel.com/research/spain-vs-argentina-world-cup-final-prediction-odds-preview-lineups-and-best-bets",
+      "moneyline_90_american": {"Spain": 130, "Draw": 190, "Argentina": 270},
+      "moneyline_90_decimal": {"Spain": 2.3, "Draw": 2.9, "Argentina": 3.7},
+      "ou_american": {
+        "1.5": {"Over": -230, "Under": 184},
+        "2.5": {"Over": 138, "Under": -170},
+        "3.5": {"Over": 370, "Under": -520}
+      },
+      "ou_decimal": {
+        "1.5": {"Over": 1.435, "Under": 2.84},
+        "2.5": {"Over": 2.38, "Under": 1.588},
+        "3.5": {"Over": 4.7, "Under": 1.192}
+      },
+      "btts_american": {"Yes": -116, "No": -110}
+    }
+  },
+  "engine": {
+    "profile": "knockout",
+    "avg_goals": 2.7,
+    "gd_per_100": 0.65,
+    "draw_boost": 0.06,
+    "dixon_coles_rho": -0.05,
+    "lambda_floor": 0.3,
+    "bookmaker_margin_default": 0.05,
+    "ensemble_w_model": 0.6
+  },
+  "formulas": {
+    "elo_expectation": "E = 1 / (1 + 10^(-ΔElo/400)) = 1/(1+10^(-32/400)) ≈ 0.546",
+    "gd": "GD ≈ (ΔElo/100) × 0.65 = 0.32 × 0.65 = 0.208",
+    "lambdas_raw": "λ_h = 2.70/2 + 0.208/2 = 1.454; λ_a = 2.70/2 - 0.208/2 = 1.246",
+    "heat_mild": "λ' = λ × 0.95 → 1.381 / 1.184; Σλ = 2.565",
+    "poisson": "P(k) = λ^k e^{-λ} / k!; matrix 0–10 + DC ρ=-0.05 + draw_boost 0.06",
+    "ou_25": "Over 2.5 = Σ P(goals ≥ 3)",
+    "market_demargin": "p_i = (1/odds_i) / Σ(1/odds)",
+    "fair_odds": "odds_fair = 1 / p",
+    "offered_odds": "odds_offered = 1 / (p × 1.05)",
+    "ensemble": "p_ens = 0.6 × p_model + 0.4 × p_market"
+  },
+  "model_primary_heat_mild": {
+    "lambda": {"Spain": 1.38, "Argentina": 1.18, "total": 2.57},
+    "wdl_90_pct": {"Spain": 37.4, "Draw": 33.7, "Argentina": 28.9},
+    "advance_pct": {"Spain": 53.4, "Argentina": 46.6},
+    "k_eff": 0.73,
+    "ou_pct": {
+      "1.5": {"Over": 72.9, "Under": 27.1},
+      "2.5": {"Over": 45.2, "Under": 54.8},
+      "3.5": {"Over": 25.4, "Under": 74.6}
+    },
+    "btts_yes_pct": 54.0,
+    "top_scores": [
+      {"score": "1-1", "pct": 16.1},
+      {"score": "0-0", "pct": 10.1},
+      {"score": "1-0", "pct": 9.2}
+    ],
+    "total_goals_mass_pct": {
+      "0": 10.1,
+      "1": 16.9,
+      "2": 27.7,
+      "3": 19.8,
+      "4": 14.3,
+      "5": 6.5,
+      "6plus": 4.7
+    },
+    "fair_odds": {
+      "1X2": {"Spain": 2.67, "Draw": 2.97, "Argentina": 3.46},
+      "ou_2.5": {"Over": 2.21, "Under": 1.82},
+      "ou_1.5": {"Over": 1.37, "Under": 3.7},
+      "ou_3.5": {"Over": 3.94, "Under": 1.34},
+      "btts": {"Yes": 1.85, "No": 2.18}
+    },
+    "offered_5pct_odds": {
+      "1X2": {"Spain": 2.55, "Draw": 2.83, "Argentina": 3.3},
+      "ou_2.5": {"Over": 2.11, "Under": 1.74},
+      "ou_1.5": {"Over": 1.31, "Under": 3.52},
+      "ou_3.5": {"Over": 3.76, "Under": 1.28},
+      "btts": {"Yes": 1.76, "No": 2.07}
+    }
+  },
+  "sensitivity_no_heat": {
+    "note": "If official weather_decision = outdoor_no_adjust (daily note prior)",
+    "lambda_total": 2.7,
+    "ou_2.5_pct": {"Over": 48.5, "Under": 51.5},
+    "gap_vs_market_over_pt": 8.5
+  },
+  "market_demargined": {
+    "method": "proportional",
+    "1X2_pct": {"Spain": 41.4, "Draw": 32.8, "Argentina": 25.7, "overround_pct": 5.0},
+    "ou_pct": {
+      "1.5": {"Over": 66.4, "Under": 33.6, "overround_pct": 4.9},
+      "2.5": {"Over": 40.0, "Under": 60.0, "overround_pct": 5.0},
+      "3.5": {"Over": 20.2, "Under": 79.8, "overround_pct": 5.1}
+    },
+    "btts_pct": {"Yes": 50.6, "No": 49.4, "overround_pct": 6.1}
+  },
+  "calibration": {
+    "ou_2.5": {
+      "model_over_pct": 45.2,
+      "market_over_pct": 40.0,
+      "ensemble_over_pct": 43.1,
+      "gap_model_minus_market_pt": 5.2,
+      "interpretation": "Both sides price Under as majority; market is ~5pt more Under-heavy than Elo-Poisson. Market likely baking Spain elite KO defense + final caginess beyond baseline knockout avg_goals=2.70."
+    },
+    "ou_1.5": {
+      "model_over_pct": 72.9,
+      "market_over_pct": 66.4,
+      "gap_pt": 6.5
+    },
+    "ou_3.5": {
+      "model_over_pct": 25.4,
+      "market_over_pct": 20.2,
+      "gap_pt": 5.2
+    },
+    "1X2_context": {
+      "model": {"Spain": 37.4, "Draw": 33.7, "Argentina": 28.9},
+      "market": {"Spain": 41.4, "Draw": 32.8, "Argentina": 25.7},
+      "gap_home_pt": -4.0
+    }
+  },
+  "divergence_analysis": [
+    {
+      "channel": "O/U 2.5",
+      "gap_pt": 5.2,
+      "model_side": "Over (relative)",
+      "likely_cause": "Market prices Spain's tournament defensive record + World Cup final low-tempo prior harder than knockout λ baseline; Argentina ET/fatigue narrative also pulls totals down on soft boards",
+      "discipline_a": "Do not stack extra fatigue/heat cuts on top of market — decide information gap; lean ensemble (43.1% Over) when gap >4pt"
+    },
+    {
+      "channel": "1X2 / cup",
+      "gap_pt": 5.6,
+      "model_side": "Argentina (advancement)",
+      "likely_cause": "Soft-book Spain narrative money (tracked in podium note day 4); separate from totals channel"
+    }
+  ],
+  "assumptions": [
+    "Neutral venue — no home Elo bump",
+    "Knockout profile avg_goals=2.70 (not group 2.90)",
+    "Primary λ uses heat_mild ×0.95 from NWS 82°F kickoff-hour snapshot; official T-6h may flip to no_adjust",
+    "No confirmed lineup λ adjustments (Pino/Muñoz not starting XI cuts; Medina doubt only)",
+    "O/U markets are 90-minute totals (standard); ET goals not in O/U 2.5",
+    "FanDuel board treated as market proxy (≥2-book ideal; second books in press show similar U2.5 favourite)"
+  ],
+  "uncertainty": "Single-match football ±5 ppt model error is normal; early red card / penalty voids the distribution. O/U Brier on tournament sample ~0.25 — totals are noisy.",
+  "artifacts": {
+    "canvas": "/Users/twan/.cursor/projects/Users-twan-Documents-Claude-Projects-world-cup-2026/canvases/wc2026-final-ou-spain-argentina.canvas.tsx",
+    "related_podium": "analysis_podium_20260717.json",
+    "daily_note": "2026世界杯_回测与改进建议_到7月17日.md"
+  }
+}

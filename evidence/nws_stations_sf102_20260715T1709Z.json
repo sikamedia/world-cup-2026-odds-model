@@ -1,0 +1,8 @@
+{
+    "correlationId": "16a82b9a",
+    "title": "Redirect",
+    "type": "https://api.weather.gov/problems/GridpointRedirect",
+    "status": 301,
+    "detail": "The requested data can be found here: /gridpoints/FFC/50,87/stations",
+    "instance": "https://api.weather.gov/requests/16a82b9a"
+}
