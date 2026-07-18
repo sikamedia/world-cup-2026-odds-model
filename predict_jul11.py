@@ -17,9 +17,16 @@ import sys
 import tempfile
 from typing import Any, Sequence
 
-from elo_snapshot import EloSnapshot, EloSnapshotError, OFFICIAL_ELO_SOURCE, load_elo_snapshot
+from elo_snapshot import (
+    DIRECT_HTTP_CAPTURE_METHOD,
+    EloSnapshot,
+    EloSnapshotError,
+    OFFICIAL_ELO_SOURCE,
+    load_elo_snapshot,
+)
 from match_context import (
     MatchContext,
+    coerce_context_payload,
     context_key,
     de_margin_odds,
     de_margin_two_way_odds,
@@ -40,11 +47,37 @@ KO = mm.STAGE_PROFILES["knockout"]
 MODEL_WEIGHT = 0.6
 MARKET_WEIGHT = 1.0 - MODEL_WEIGHT
 MARKET_GAP_REVIEW_THRESHOLD = 0.04
-ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_SCHEMA_VERSION = 4
 ARTIFACT_TYPE = "pre_registered_match_prediction"
+LEGACY_DIRECT_MATCH_ARTIFACT_SCHEMA_VERSION = 3
+LEGACY_MATCH_ARTIFACT_SCHEMA_VERSION = 2
 LEGACY_QF_ARTIFACT_SCHEMA_VERSION = 1
 LEGACY_QF_ARTIFACT_TYPE = "pre_registered_qf_prediction"
+ELO_PROVENANCE_CONTRACT = "direct_http_v1"
+OFFICIAL_ELO_MAX_AGE_HOURS = 0.5
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+SCHEMA4_WEATHER_KEYS = frozenset(
+    {
+        "decision",
+        "scale",
+        "checked_at_utc",
+        "forecast_issued_at_utc",
+        "forecast_valid_at_utc",
+        "source",
+        "evidence_type",
+        "roof_status",
+        "evidence_fixture_id",
+        "evidence_snapshot",
+        "evidence_sha256",
+        "capture_method",
+        "points_source",
+        "points_evidence_snapshot",
+        "points_evidence_sha256",
+        "forecast_generated_at_utc",
+    }
+)
+SCHEMA4_STAGES = frozenset({"third_place", "final"})
+SCHEMA3_STAGES = frozenset({"quarterfinal", "semifinal"})
 
 
 @dataclass(frozen=True)
@@ -257,8 +290,22 @@ def _seal_artifact(payload: dict[str, Any]) -> dict[str, Any]:
     return {"payload": payload, "payload_sha256": _payload_sha256(payload)}
 
 
-def _weather_payload(context: MatchContext) -> dict[str, Any]:
-    return {
+def _artifact_schema_version(fixture: Fixture) -> int:
+    if fixture.stage in SCHEMA4_STAGES:
+        return ARTIFACT_SCHEMA_VERSION
+    if fixture.stage in SCHEMA3_STAGES:
+        return LEGACY_DIRECT_MATCH_ARTIFACT_SCHEMA_VERSION
+    raise PredictionRunError(
+        f"official artifact stage has no schema policy: {fixture.stage!r}"
+    )
+
+
+def _weather_payload(
+    context: MatchContext,
+    *,
+    schema_version: int,
+) -> dict[str, Any]:
+    payload = {
         "decision": context.weather_decision,
         "scale": context.weather_scale,
         "checked_at_utc": context.weather_checked_at_utc,
@@ -271,6 +318,17 @@ def _weather_payload(context: MatchContext) -> dict[str, Any]:
         "evidence_snapshot": context.weather_evidence_snapshot,
         "evidence_sha256": context.weather_evidence_sha256,
     }
+    if schema_version == ARTIFACT_SCHEMA_VERSION:
+        payload.update(
+            {
+                "capture_method": context.weather_capture_method,
+                "points_source": context.weather_points_source,
+                "points_evidence_snapshot": context.weather_points_evidence_snapshot,
+                "points_evidence_sha256": context.weather_points_evidence_sha256,
+                "forecast_generated_at_utc": context.weather_forecast_generated_at_utc,
+            }
+        )
+    return payload
 
 
 def _build_artifact(
@@ -281,9 +339,13 @@ def _build_artifact(
     source_tsv: Path,
     generated_at: datetime,
 ) -> dict[str, Any]:
+    receipt = snapshot.capture_receipt
+    if receipt is None:
+        raise PredictionRunError("official artifact requires direct Elo capture provenance")
+    schema_version = _artifact_schema_version(fixture)
     top_scores = sorted(prediction["matrix"].items(), key=lambda item: -item[1])[:5]
     payload = {
-        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "artifact_type": ARTIFACT_TYPE,
         "fixture": {
             "slug": fixture.slug,
@@ -355,14 +417,19 @@ def _build_artifact(
         "context": {
             "lineup_home": context.lineup_home,
             "lineup_away": context.lineup_away,
-            "weather": _weather_payload(context),
+            "weather": _weather_payload(context, schema_version=schema_version),
             "notes": context.notes,
         },
         "elo_provenance": {
+            "provenance_contract": ELO_PROVENANCE_CONTRACT,
             "source": snapshot.source,
             "source_sha256": snapshot.source_sha256,
             "fetched_at_utc": _utc_text(snapshot.fetched_at_utc),
             "retained_tsv_name": source_tsv.name,
+            "capture_method": receipt.capture_method,
+            "receipt_sha256": receipt.receipt_sha256,
+            "retained_receipt_name": Path(receipt.receipt_ref).name,
+            "body_byte_count": receipt.body_byte_count,
             "ratings": {
                 fixture.home: snapshot.ratings[fixture.home],
                 fixture.away: snapshot.ratings[fixture.away],
@@ -420,6 +487,7 @@ def _load_snapshot(
     *,
     elo_module: str,
     elo_source_tsv: str,
+    elo_receipt: str,
     required_teams: Sequence[str],
     max_age_hours: float,
     now: datetime,
@@ -434,6 +502,8 @@ def _load_snapshot(
             max_age_hours=max_age_hours,
             now_utc=now,
             source_tsv=source_tsv,
+            source_receipt=elo_receipt,
+            require_direct_capture=True,
         )
     except EloSnapshotError as exc:
         raise PredictionRunError(f"official Elo validation failed: {exc}") from exc
@@ -450,6 +520,9 @@ def _validate_finalize_context(
         require_evidence=True,
         now_utc=now,
         expected_fixture_id=fixture.fixture_id,
+        require_structured_weather=(
+            _artifact_schema_version(fixture) == ARTIFACT_SCHEMA_VERSION
+        ),
     )
     try:
         actual_kickoff = _parse_utc(context.kickoff_at_utc or "", "kickoff_at_utc")
@@ -479,6 +552,7 @@ def _finalize(
     *,
     elo_module: str,
     elo_source_tsv: str,
+    elo_receipt: str,
     context_file: str,
     artifact_out: str,
     max_elo_age_hours: float,
@@ -487,8 +561,9 @@ def _finalize(
     snapshot, source_tsv = _load_snapshot(
         elo_module=elo_module,
         elo_source_tsv=elo_source_tsv,
+        elo_receipt=elo_receipt,
         required_teams=[fixture.home, fixture.away],
-        max_age_hours=max_elo_age_hours,
+        max_age_hours=min(max_elo_age_hours, OFFICIAL_ELO_MAX_AGE_HOURS),
         now=now,
     )
     try:
@@ -565,6 +640,68 @@ def _number_probability(value: Any, field: str) -> float:
     return result
 
 
+def _validate_current_artifact_weather(
+    artifact_path: Path,
+    payload: dict[str, Any],
+    fixture: Fixture,
+    generated: datetime,
+) -> None:
+    context_payload = payload.get("context")
+    weather = context_payload.get("weather") if isinstance(context_payload, dict) else None
+    if not isinstance(weather, dict):
+        raise ArtifactError(f"artifact {artifact_path} is missing schema-4 weather provenance")
+    missing_weather_keys = sorted(SCHEMA4_WEATHER_KEYS - set(weather))
+    if missing_weather_keys:
+        raise ArtifactError(
+            f"artifact {artifact_path} is missing required schema-4 weather provenance "
+            f"keys: {missing_weather_keys}"
+        )
+    try:
+        context = coerce_context_payload(
+            {
+                "weather_scale": weather.get("scale"),
+                "kickoff_at_utc": fixture.kickoff_at_utc,
+                "weather_checked_at_utc": weather.get("checked_at_utc"),
+                "weather_forecast_issued_at_utc": weather.get("forecast_issued_at_utc"),
+                "weather_forecast_valid_at_utc": weather.get("forecast_valid_at_utc"),
+                "weather_source": weather.get("source"),
+                "weather_evidence_type": weather.get("evidence_type"),
+                "weather_evidence_snapshot": weather.get("evidence_snapshot"),
+                "weather_evidence_sha256": weather.get("evidence_sha256"),
+                "weather_decision": weather.get("decision"),
+                "roof_status": weather.get("roof_status"),
+                "weather_evidence_fixture_id": weather.get("evidence_fixture_id"),
+                "weather_capture_method": weather.get("capture_method"),
+                "weather_points_source": weather.get("points_source"),
+                "weather_points_evidence_snapshot": weather.get(
+                    "points_evidence_snapshot"
+                ),
+                "weather_points_evidence_sha256": weather.get(
+                    "points_evidence_sha256"
+                ),
+                "weather_forecast_generated_at_utc": weather.get(
+                    "forecast_generated_at_utc"
+                ),
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        raise ArtifactError(
+            f"artifact {artifact_path} has invalid schema-4 weather provenance: {exc}"
+        ) from exc
+    issues = validate_weather_context(
+        context,
+        require_evidence=True,
+        now_utc=generated,
+        expected_fixture_id=fixture.fixture_id,
+        require_structured_weather=True,
+    )
+    if issues:
+        raise ArtifactError(
+            f"artifact {artifact_path} has invalid schema-4 weather provenance: "
+            + "; ".join(issues)
+        )
+
+
 def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, str]:
     artifact_path = Path(path)
     try:
@@ -582,13 +719,26 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         raise ArtifactError(
             f"artifact hash mismatch for {artifact_path}: stored={digest}, actual={actual_digest}"
         )
-    schema_identity = (payload.get("schema_version"), payload.get("artifact_type"))
+    schema_version = payload.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ArtifactError(f"artifact {artifact_path} has invalid schema_version type")
+    schema_identity = (schema_version, payload.get("artifact_type"))
     is_current = schema_identity == (ARTIFACT_SCHEMA_VERSION, ARTIFACT_TYPE)
+    is_legacy_direct_match = schema_identity == (
+        LEGACY_DIRECT_MATCH_ARTIFACT_SCHEMA_VERSION,
+        ARTIFACT_TYPE,
+    )
+    is_legacy_match = schema_identity == (
+        LEGACY_MATCH_ARTIFACT_SCHEMA_VERSION,
+        ARTIFACT_TYPE,
+    )
     is_legacy_qf = schema_identity == (
         LEGACY_QF_ARTIFACT_SCHEMA_VERSION,
         LEGACY_QF_ARTIFACT_TYPE,
     )
-    if not is_current and not is_legacy_qf:
+    if not (
+        is_current or is_legacy_direct_match or is_legacy_match or is_legacy_qf
+    ):
         raise ArtifactError(f"artifact {artifact_path} has unsupported schema/type")
     fixture_payload = payload.get("fixture")
     if not isinstance(fixture_payload, dict):
@@ -602,16 +752,26 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         and fixture_payload.get("away") == fixture.away
         and fixture_payload.get("kickoff_at_utc") == fixture.kickoff_at_utc
     )
-    if is_current:
+    if is_current or is_legacy_direct_match or is_legacy_match:
         expected_identity = expected_identity and fixture_payload.get("stage") == fixture.stage
     else:
         expected_identity = (
             expected_identity
+            and fixture is not None
             and fixture.slug in QF_FIXTURE_SLUGS
             and "stage" not in fixture_payload
         )
     if not expected_identity:
         raise ArtifactError(f"artifact {artifact_path} has an unexpected fixture identity")
+    expected_schema_version = _artifact_schema_version(fixture)
+    if schema_version in {
+        ARTIFACT_SCHEMA_VERSION,
+        LEGACY_DIRECT_MATCH_ARTIFACT_SCHEMA_VERSION,
+    } and schema_version != expected_schema_version:
+        raise ArtifactError(
+            f"artifact {artifact_path} schema {schema_version} is not permitted for "
+            f"stage {fixture.stage}; expected schema {expected_schema_version}"
+        )
     generated = _parse_utc(payload.get("generated_at_utc", ""), "generated_at_utc")
     kickoff = _parse_utc(fixture.kickoff_at_utc, "kickoff_at_utc")
     if generated >= kickoff:
@@ -625,12 +785,60 @@ def _load_artifact(path: str | Path, *, now: datetime) -> tuple[Fixture, float, 
         raise ArtifactError(f"artifact {artifact_path} has invalid Elo source provenance")
     if not isinstance(elo.get("source_sha256"), str) or _SHA256_RE.fullmatch(elo["source_sha256"]) is None:
         raise ArtifactError(f"artifact {artifact_path} has invalid Elo SHA-256 provenance")
+    if is_current or is_legacy_direct_match:
+        if elo.get("provenance_contract") != ELO_PROVENANCE_CONTRACT:
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo provenance contract")
+        if elo.get("capture_method") != DIRECT_HTTP_CAPTURE_METHOD:
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo capture method")
+        receipt_sha256 = elo.get("receipt_sha256")
+        if not isinstance(receipt_sha256, str) or _SHA256_RE.fullmatch(receipt_sha256) is None:
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo receipt SHA-256")
+        receipt_name = elo.get("retained_receipt_name")
+        if (
+            not isinstance(receipt_name, str)
+            or not receipt_name
+            or Path(receipt_name).name != receipt_name
+        ):
+            raise ArtifactError(f"artifact {artifact_path} has invalid retained Elo receipt name")
+        body_byte_count = elo.get("body_byte_count")
+        if (
+            isinstance(body_byte_count, bool)
+            or not isinstance(body_byte_count, int)
+            or body_byte_count <= 0
+        ):
+            raise ArtifactError(f"artifact {artifact_path} has invalid Elo body byte count")
+        captured_at = _parse_utc(
+            elo.get("fetched_at_utc", ""),
+            "elo_provenance.fetched_at_utc",
+        )
+        if captured_at > generated:
+            raise ArtifactError(f"artifact {artifact_path} Elo capture completed after generation")
+    if is_current:
+        _validate_current_artifact_weather(artifact_path, payload, fixture, generated)
     official = payload.get("official")
     if not isinstance(official, dict):
         raise ArtifactError(f"artifact {artifact_path} is missing official probabilities")
     if official.get("model_weight") != MODEL_WEIGHT or official.get("market_weight") != MARKET_WEIGHT:
         raise ArtifactError(f"artifact {artifact_path} does not use frozen w=0.6 ensemble")
+    model = payload.get("model")
+    market = payload.get("market")
+    if not isinstance(model, dict) or not isinstance(market, dict):
+        raise ArtifactError(f"artifact {artifact_path} is missing model/market probabilities")
+    model_advance_home = _number_probability(
+        model.get("advance_home"), "model.advance_home"
+    )
+    market_advance_home = _number_probability(
+        market.get("advance_home"), "market.advance_home"
+    )
     advance_home = _number_probability(official.get("advance_home"), "official.advance_home")
+    expected_advance_home = (
+        MODEL_WEIGHT * model_advance_home + MARKET_WEIGHT * market_advance_home
+    )
+    if abs(advance_home - expected_advance_home) > 1e-9:
+        raise ArtifactError(
+            f"artifact {artifact_path} official advancement probability does not "
+            "match frozen w=0.6 ensemble"
+        )
     wdl = official.get("wdl_90")
     if not isinstance(wdl, dict):
         raise ArtifactError(f"artifact {artifact_path} is missing official.wdl_90")
@@ -706,6 +914,7 @@ def _run_mc(args: argparse.Namespace, *, now: datetime) -> None:
     snapshot, _source_tsv = _load_snapshot(
         elo_module=args.elo_module,
         elo_source_tsv=args.elo_source_tsv,
+        elo_receipt=args.elo_receipt,
         required_teams=required_teams,
         max_age_hours=args.max_elo_age_hours,
         now=now,
@@ -742,7 +951,13 @@ def _run_mc(args: argparse.Namespace, *, now: datetime) -> None:
 def _add_elo_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--elo-module", default="elo_current_latest.py")
     parser.add_argument("--elo-source-tsv", required=True)
-    parser.add_argument("--max-elo-age-hours", type=float, default=24.0)
+    parser.add_argument("--elo-receipt", required=True)
+    parser.add_argument(
+        "--max-elo-age-hours",
+        type=float,
+        default=24.0,
+        help="maximum Elo age; finalize is always hard-capped at 0.5 hours",
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -776,6 +991,7 @@ def main(argv: Sequence[str] | None = None, *, now_utc: datetime | None = None) 
                 FIXTURES[args.fixture],
                 elo_module=args.elo_module,
                 elo_source_tsv=args.elo_source_tsv,
+                elo_receipt=args.elo_receipt,
                 context_file=args.context_file,
                 artifact_out=args.artifact_out,
                 max_elo_age_hours=args.max_elo_age_hours,

@@ -19,15 +19,59 @@ here and in the next generated report.
   `basis=live_current_elo` rows. At eligible n>=12 it reports a model-weight
   grid from 0.0 to 1.0 in 0.1 steps; `mixed_legacy` and counterfactual rows are
   excluded. The grid is a review output, not an automatic production refit.
+- Ensemble probabilities and `advanced_reference` are defined against
+  `reference_side` (`H` or `A`). Readers continue to accept the legacy ledger
+  field names `fav_side` and `advanced_fav`. When both new and legacy fields
+  are populated, they must agree.
+- The 11 live rows through France-Spain are the explicit pre-policy
+  grandfather set. Every other `live_current_elo` fixture, and all fixtures
+  dated 2026-07-15 or later, must name a repository-relative
+  `pre_match_evidence` file under `evidence/`. The reader validates that file
+  before counting the row and requires its fixture identity and kickoff to
+  match the canonical fixture registry and ledger date. It may be a valid
+  official pre-match artifact or a sealed `ensemble_pre_match_freeze` record;
+  an official artifact is not required for admission.
+- A freeze record must predate kickoff, declare that no live match state was
+  used, bind the row's `reference_side` and three probabilities, retain a
+  direct-HTTP World.tsv/receipt pair no more than 30 minutes old, contain
+  non-estimated participant ratings matching those bytes, and retain the
+  selected market odds/source/capture time/de-margin and advancement methods.
+  Its exact model basis is `predict_jul11._predict/v1`, the frozen knockout
+  profile and parameter set (including `style_threshold=266`); its exact context
+  basis contains only the weather decision/scale and home/away lineup scales.
+  The reader replays that model from the retained ratings, checks the probability
+  for `reference_side`, recomputes the market probability (including the replayed
+  draw split for `derived_from_90`), and requires the blend to equal frozen
+  `w=0.6`. Missing, stale, mismatched, ignored extra context, post-kickoff, or
+  post-result reconstructed evidence fails closed and cannot open the n=12 grid.
+- A sealed payload hash proves internal integrity, not when the file first
+  existed. `summarize_ensemble_basis()` therefore defaults to rejecting every
+  freeze unless its caller supplies an external `trusted_anchor_resolver`. The
+  resolver must return a `TrustedTimingAnchor` whose source and anchor ID match
+  the freeze reference, whose digest matches the sealed payload, and whose
+  observation satisfies `frozen_at <= observed_at < kickoff`. The resolver must
+  read a trusted scheduler/Git/WORM system, never derive trust from the local
+  freeze. Valid official artifacts do not require this freeze-only resolver.
 - `basis` records the Elo input basis; it does not certify that an official
   finalization artifact exists. The two July 11 QF preview rows remain eligible
   because they were frozen pre-match with current Elo and market inputs. Their
   missing official artifacts are disclosed in notes and are not grounds for a
   post-result cohort change.
-- Official schema-2 artifacts record model-minus-market 90-minute and
-  advancement gaps. An absolute gap of at least 4 points sets a review flag for
-  missing information; it does not authorize a parameter adjustment during the
-  tournament freeze.
+- QF and semifinal finalization remains on schema 3, including any compliant
+  SF102 retry before kickoff. Schema 4 activates only for `third_place` and
+  `final` artifacts, where it records structured weather provenance in addition
+  to direct-HTTP Elo receipt provenance and signed model-minus-market gaps.
+  Register those operational fixtures only after SF102 settles and the real
+  participants are known; synthetic participants belong in tests only.
+  Readers remain compatible with schemas 1-4 and reject a stage/schema mismatch.
+  An absolute gap of at least 4 points sets a review flag for missing information;
+  it does not authorize a parameter adjustment during the tournament freeze.
+- For third-place/final artifacts, weather schema 4 validates source identity,
+  exact canonical capture-method values, retained snapshots, hashes,
+  timestamps, and the kickoff-covering period. It does not infer a heat or rain
+  decision from forecast values. Those decisions continue to use the frozen
+  analyst policy and must cite the retained kickoff period; schema adoption does
+  not introduce a new weather threshold or model parameter.
 
 ## 90-minute style cohort
 
@@ -49,6 +93,12 @@ The cohort remains `MONITOR_ONLY` until 20 distinct eligible resolved fixtures.
 No single result, including a Belgium 90-minute win, can trigger an official or
 shadow parameter adjustment.
 
+SF1 and SF102 remain descriptive model-market disagreement observations. They
+do not enter this cohort unless every formal criterion above was frozen before
+kickoff. Reports must describe price movement or reported money flow neutrally;
+they must not infer recreational, sharp, or narrative-driven participants
+without independent evidence.
+
 ## Shootouts and home advantage
 
 - The structured shootout ledger currently contains four shootouts. The
@@ -64,9 +114,9 @@ shadow parameter adjustment.
 
 ## Current checkpoint
 
-- KO results are current through Argentina 3-1 Switzerland after extra time:
-  n=28. The 90-minute RPS is 0.1472; advancement Brier is 0.1606 and log-loss
-  is 0.4930.
+- KO results are current through Spain 2-0 France: n=29. The 90-minute RPS is
+  0.1478 and advancement Brier is 0.1604. The completed n=28 parameter review
+  remains the frozen decision checkpoint.
 - The paired graded-minus-flat-1.00 Brier delta is +0.0036 with 95% CI
   [-0.0044, +0.0116]. The n=28 gate is reached, but the interval crosses zero:
   `NO_DECISION`; graded-k stays frozen. Flat 1.00's retrospective Brier of
@@ -76,10 +126,10 @@ shadow parameter adjustment.
 - The draw-boost x floor interaction gate is reached. Its RPS interaction is
   +0.00003, so the diagnostic state is `REVIEW_INTERACTION` but the measured
   effect is negligible and production parameters remain frozen.
-- The ensemble ledger has 10 eligible `live_current_elo` rows out of 12 total;
+- The ensemble ledger has 11 eligible `live_current_elo` rows out of 13 total;
   one `mixed_legacy` and one counterfactual row are excluded. The n=12 grid has
-  not run, current w=0.6 Brier is 0.1635, and the state is `HOLD_W_0_6`. Two
-  further eligible settled rows open the diagnostic grid review, not an
+  not run, current w=0.6 Brier is 0.1726, and the state is `HOLD_W_0_6`. One
+  further eligible settled row opens the diagnostic grid review, not an
   automatic production refit.
 - The style ledger contains three observations across two fixtures, but zero
   formally eligible fixtures. Any reported "low-block side 4/4" sequence is a
@@ -100,6 +150,12 @@ shadow parameter adjustment.
   new applied-rain window.
 - The July 11 QFs had no isolated official finalization artifacts. Their ledger
   rows use the frozen 07:00 preview values and must remain labelled as such.
+- The July 14 17:18Z direct-HTTP Elo capture succeeded in a different network
+  environment. It does not prove that the scheduled-task sandbox allowlist was
+  restored.
+- The July 15 report's SF102 numbers reuse the prior day's Elo snapshot. For
+  governance purposes that run records no current daily preview; its published
+  numbers can only be treated as historical replay values.
 - A draw alert and a shootout forecast are separate outcomes. Norway-England's
   and Argentina-Switzerland's 90-minute draws count as alert hits; both were
   resolved in extra time, so `shootout_occurred=false` in each case.

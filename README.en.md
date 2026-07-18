@@ -44,6 +44,8 @@ advice, staking advice, or guaranteed predictions.
 |-- backtest_ko.py                  (knockout-stage batch, grows as games play)
 |-- predict_r32.py                  (Round-of-32 advancement table)
 |-- predict_bracket.py              (full-bracket champion / deep-run odds)
+|-- capture_elo_evidence.py         (create-only direct World.tsv capture + receipt)
+|-- fetch_elo_current.py            (receipt-verified current Elo module)
 |-- create_context_template.py
 |-- fetch_the_odds_api.py
 |-- import_context_csv.py
@@ -128,6 +130,29 @@ export ODDS_API_SPORT_KEY="..."
 
 Do not commit API keys, `.env` files, or private recorded payloads.
 
+Current Elo must come from one direct-response capture for both daily previews
+and official runs:
+
+```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260714T1605Z.tsv \
+  --receipt-out evidence/World_20260714T1605Z.receipt.json \
+  --timeout-seconds 30
+
+python3 fetch_elo_current.py \
+  --tsv evidence/World_20260714T1605Z.tsv \
+  --receipt evidence/World_20260714T1605Z.receipt.json \
+  --out elo_current_latest.py \
+  --required-team France \
+  --required-team Spain
+```
+
+The capture writes the unmodified HTTP response body and its receipt to new,
+create-only paths. Do not copy or reuse an older TSV, reconstruct or transcode
+it, or normalize its newlines. The receipt records response-completion time,
+byte count, and SHA-256. Capture failure means no Elo-based daily preview;
+official finalization additionally rejects evidence older than 30 minutes.
+
 Weather adjustments are auditable context, not model parameters. Current
 predictions must record kickoff/check/forecast issue and valid times, an
 HTTP(S) source, evidence type, evidence snapshot plus SHA-256, decision, and
@@ -136,6 +161,23 @@ the forecast issue may be no more than 24 hours old when checked;
 `rain_applied` requires hourly/radar evidence within 3 hours. Missing or stale
 evidence is a blocking error, not a warning.
 
+For outdoor `api.weather.gov` evidence, retain the points response and the
+hourly response reached through its exact `properties.forecastHourly` URL.
+The points response `id` (or `properties.@id`) must equal the declared points
+URL.
+Record `weather_capture_method` as `direct_http_response_body` or
+`workspace_web_fetch` exactly; case, whitespace, and hyphen aliases are rejected.
+Also record `weather_points_source`,
+`weather_points_evidence_snapshot`, and
+`weather_points_evidence_sha256`. The hourly `properties.updateTime` is the
+only forecast issuance time; store `generatedAt` separately as
+`weather_forecast_generated_at_utc`. The retained hourly periods must contain
+one with `startTime <= kickoff < endTime`. A `workspace_web_fetch` snapshot is
+auditable tool text, not raw or byte-identical HTTP response evidence.
+Schema 4 validates this provenance chain and period coverage for third-place
+and final artifacts; it does not infer the `heat_*` or `rain_*` decision from
+forecast values or change the frozen weather adjustment mapping.
+
 `indoor_no_weather` is valid only with official, match-specific roof evidence
 checked within six hours, `roof_status=closed`, and the selected fixture's exact
 `weather_evidence_fixture_id`. A retractable roof by itself is not indoor
@@ -143,10 +185,27 @@ evidence.
 
 Use `create_context_template.py --source sf_jul14_15 --fixture <slug>` to create
 one semifinal finalization template, then import the completed CSV with
-`--require-weather-evidence --context-only`. `predict_jul11.py finalize` writes
-a stage-labelled schema-2, hashed, create-only artifact for exactly that
-fixture; direct two-way advancement odds take precedence over the documented
-90-minute fallback. The historical `predict_jul11.py mc` path remains QF-only.
+`--require-weather-evidence --context-only`.
+`predict_jul11.py finalize` and
+`predict_jul11.py mc` require the matching `--elo-receipt`; QF/SF finalization
+writes a stage-labelled schema-3, hashed, create-only artifact with
+`direct_http_v1` provenance for exactly that fixture. Third-place/final uses
+schema 4 and requires `--require-structured-weather`. Register those real
+fixtures only after SF102 settles; do not invent participants. Direct two-way advancement
+odds take precedence over the documented 90-minute fallback. The historical
+`predict_jul11.py mc` path remains QF-only, and schemas 1-4 remain readable only
+at their permitted stages.
+The 11 `live_current_elo` fixtures through France-Spain are explicitly
+grandfathered. Any new ensemble-ledger fixture is counted only when
+`pre_match_evidence` points to a validated official artifact or sealed
+pre-match freeze under `evidence/`. The evidence must bind fresh direct-Elo
+bytes/receipt and the frozen model/market probabilities; post-match
+reconstruction is rejected. Freeze admission defaults to denial unless the
+caller supplies a trusted external resolver whose source/anchor ID/digest match
+and whose observation satisfies `frozen_at <= observed_at < kickoff`. The
+validator replays `predict_jul11._predict/v1` with the exact frozen knockout,
+weather, and lineup basis before accepting the recorded probability. Official
+artifacts do not use this freeze-only resolver.
 See
 [AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md) for the external scheduler
 contract and finalization times.
@@ -165,6 +224,7 @@ python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
   --elo-module elo_current_latest.py \
   --elo-source-tsv evidence/World.tsv \
+  --elo-receipt evidence/World.receipt.json \
   --output-csv /tmp/paper_signals.csv \
   --append-ledger paper_bet_ledger.csv \
   --date 2026-07-05 \
@@ -172,8 +232,9 @@ python3 generate_paper_signals.py \
 ```
 
 By default, `generate_paper_signals.py` reads `elo_current_latest.py` and
-validates the exact World.tsv source, SHA-256, 24-hour freshness, required-team
-coverage, and `ESTIMATES=[]`. Any failure exits before a CSV is written.
+validates the direct-HTTP receipt, exact World.tsv source, SHA-256, 24-hour
+freshness, required-team coverage, and `ESTIMATES=[]`. Any failure exits before
+a CSV is written.
 Group-stage labels select `group_v37a`; knockout labels select
 `knockout_locked`. Use `--elo-source snapshot` only for historical replay.
 
@@ -192,6 +253,7 @@ python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
   --elo-module elo_current_latest.py \
   --elo-source-tsv evidence/World.tsv \
+  --elo-receipt evidence/World.receipt.json \
   --output-csv /tmp/paper_signals.csv \
   --date 2026-07-05 \
   --stage R16 \

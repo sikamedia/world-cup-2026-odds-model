@@ -10,14 +10,70 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
-from datetime import datetime
-from math import fsum, sqrt
+from datetime import date, datetime, timedelta, timezone
+import hashlib
+import json
+from math import fsum, isfinite, sqrt
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 from urllib.parse import urlparse
+
+from elo_snapshot import (
+    DIRECT_HTTP_CAPTURE_METHOD,
+    OFFICIAL_ELO_SOURCE,
+    EloSnapshotError,
+    load_elo_capture_receipt,
+    parse_world_tsv_bytes,
+)
 
 
 Z_95 = 1.959963984540054
+ENSEMBLE_PROVENANCE_EFFECTIVE_DATE = date(2026, 7, 15)
+ENSEMBLE_FREEZE_SCHEMA_VERSION = 1
+ENSEMBLE_FREEZE_ARTIFACT_TYPE = "ensemble_pre_match_freeze"
+ENSEMBLE_MAX_ELO_AGE = timedelta(minutes=30)
+ENSEMBLE_MODEL_WEIGHT = 0.6
+ENSEMBLE_MODEL_ENGINE = "predict_jul11._predict/v1"
+ENSEMBLE_MODEL_PROFILE = "knockout"
+ENSEMBLE_MODEL_STYLE_THRESHOLD = 266.0
+ENSEMBLE_MODEL_PARAMETER_KEYS = (
+    "avg_goals",
+    "gd_per_100",
+    "draw_boost",
+    "ko_regress",
+    "ko_regress_max",
+    "ko_elo_scale",
+    "pen_tilt",
+    "lambda_floor",
+)
+ENSEMBLE_PRE_POLICY_LIVE_FIXTURES = frozenset(
+    {
+        (date(2026, 7, 5), "R16", "Brazil", "Norway"),
+        (date(2026, 7, 5), "R16", "Mexico", "England"),
+        (date(2026, 7, 6), "R16", "Portugal", "Spain"),
+        (date(2026, 7, 6), "R16", "USA", "Belgium"),
+        (date(2026, 7, 7), "R16", "Argentina", "Egypt"),
+        (date(2026, 7, 7), "R16", "Switzerland", "Colombia"),
+        (date(2026, 7, 9), "QF", "France", "Morocco"),
+        (date(2026, 7, 10), "QF", "Spain", "Belgium"),
+        (date(2026, 7, 11), "QF", "Norway", "England"),
+        (date(2026, 7, 11), "QF", "Argentina", "Switzerland"),
+        (date(2026, 7, 14), "SF", "France", "Spain"),
+    }
+)
+
+
+@dataclass(frozen=True)
+class TrustedTimingAnchor:
+    """One digest observation returned by an external trusted system."""
+
+    source: str
+    anchor_id: str
+    payload_sha256: str
+    observed_at_utc: datetime
+
+
+TrustedAnchorResolver = Callable[[str, str], TrustedTimingAnchor]
 
 
 def _check_probability(value: float, field: str) -> float:
@@ -427,7 +483,8 @@ class StyleCohortSummary:
 
 
 def load_style_observations(path: str | Path) -> list[StyleObservation]:
-    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+    ledger_path = Path(path)
+    with ledger_path.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
     observations: list[StyleObservation] = []
     seen_ids: set[str] = set()
@@ -798,6 +855,644 @@ def summarize_home_advantage(
     )
 
 
+def _required_utc_timestamp(raw: object, field: str) -> datetime:
+    if not isinstance(raw, str):
+        raise ValueError(f"{field} must be an ISO-8601 timestamp with timezone")
+    parsed = _parse_timezone_timestamp(raw.strip())
+    if parsed is None:
+        raise ValueError(f"{field} must be an ISO-8601 timestamp with timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _canonical_json_bytes(payload: dict[str, Any]) -> bytes:
+    try:
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"pre-match evidence payload is not canonical JSON: {exc}") from exc
+    return encoded.encode("ascii")
+
+
+def _load_pre_match_envelope(path: Path) -> tuple[dict[str, Any], str]:
+    try:
+        envelope = json.loads(path.read_text(encoding="ascii"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read pre-match evidence {path}: {exc}") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"payload", "payload_sha256"}:
+        raise ValueError(
+            f"pre-match evidence {path} must contain only payload and payload_sha256"
+        )
+    payload = envelope["payload"]
+    digest = envelope["payload_sha256"]
+    if not isinstance(payload, dict) or not isinstance(digest, str):
+        raise ValueError(f"pre-match evidence {path} has invalid envelope types")
+    actual = hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+    if digest != actual:
+        raise ValueError(
+            f"pre-match evidence hash mismatch for {path}: stored={digest}, actual={actual}"
+        )
+    return payload, digest
+
+
+def _resolve_ledger_evidence(ledger_path: Path, raw: str, field: str) -> Path:
+    relative = Path(raw)
+    if (
+        not raw
+        or relative.is_absolute()
+        or ".." in relative.parts
+        or not relative.parts
+        or relative.parts[0] != "evidence"
+    ):
+        raise ValueError(f"{field} must be a repository-relative path under evidence/")
+    root = ledger_path.parent.resolve()
+    candidate = root
+    for part in relative.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise ValueError(f"{field} must not use symbolic links")
+    try:
+        approved_root = (root / "evidence").resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"cannot resolve {field}: {exc}") from exc
+    if resolved == approved_root or approved_root not in resolved.parents:
+        raise ValueError(f"{field} escapes the repository evidence directory")
+    if not resolved.is_file():
+        raise ValueError(f"{field} must resolve to a regular file")
+    return resolved
+
+
+def _normalized_stage(raw: object) -> str:
+    value = str(raw or "").strip().lower().replace("-", "_")
+    aliases = {
+        "r16": "R16",
+        "round_of_16": "R16",
+        "qf": "QF",
+        "quarterfinal": "QF",
+        "quarter_final": "QF",
+        "sf": "SF",
+        "semifinal": "SF",
+        "semi_final": "SF",
+        "3p": "3P",
+        "third_place": "3P",
+        "f": "F",
+        "final": "F",
+    }
+    return aliases.get(value, str(raw or "").strip().upper())
+
+
+def _probability_for_reference(
+    home_probability: object,
+    reference_side: str,
+    field: str,
+) -> float:
+    probability = _check_probability(float(home_probability), field)
+    return probability if reference_side == "H" else 1.0 - probability
+
+
+def _require_probability_match(actual: float, recorded: float, field: str) -> None:
+    if abs(actual - recorded) > 0.0015:
+        raise ValueError(
+            f"{field} does not match pre-match evidence: ledger={recorded:.6f}, "
+            f"evidence={actual:.6f}"
+        )
+
+
+def _require_exact_probability_match(
+    actual: float,
+    recorded: float,
+    field: str,
+) -> None:
+    if abs(actual - recorded) > 1e-9:
+        raise ValueError(
+            f"{field} is internally inconsistent: "
+            f"recorded={recorded:.12f}, calculated={actual:.12f}"
+        )
+
+
+def _require_exact_keys(
+    value: dict[str, Any],
+    expected: set[str],
+    field: str,
+) -> None:
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unknown = sorted(actual - expected)
+        details = []
+        if missing:
+            details.append(f"missing={missing}")
+        if unknown:
+            details.append(f"unknown={unknown}")
+        raise ValueError(f"{field} keys must match schema ({', '.join(details)})")
+
+
+def _required_finite_number(
+    raw: object,
+    field: str,
+    *,
+    positive: bool = False,
+) -> float:
+    if isinstance(raw, bool):
+        raise ValueError(f"{field} must be numeric")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be numeric") from exc
+    if not isfinite(value) or (positive and value <= 0.0):
+        qualifier = "finite and positive" if positive else "finite"
+        raise ValueError(f"{field} must be {qualifier}")
+    return value
+
+
+def _validate_retained_elo(
+    evidence_path: Path,
+    elo: object,
+    *,
+    home: str,
+    away: str,
+    frozen_at: datetime,
+) -> dict[str, float]:
+    if not isinstance(elo, dict):
+        raise ValueError("pre-match evidence requires elo_provenance")
+    if elo.get("source") != OFFICIAL_ELO_SOURCE:
+        raise ValueError("pre-match evidence has invalid Elo source")
+    if elo.get("capture_method") != DIRECT_HTTP_CAPTURE_METHOD:
+        raise ValueError("pre-match evidence requires direct HTTP Elo capture")
+
+    tsv_name = elo.get("retained_tsv_name")
+    receipt_name = elo.get("retained_receipt_name")
+    if (
+        not isinstance(tsv_name, str)
+        or not tsv_name
+        or Path(tsv_name).name != tsv_name
+        or not isinstance(receipt_name, str)
+        or not receipt_name
+        or Path(receipt_name).name != receipt_name
+    ):
+        raise ValueError("pre-match evidence has invalid retained Elo file names")
+    tsv_path = evidence_path.parent / tsv_name
+    receipt_path = evidence_path.parent / receipt_name
+    evidence_directory = evidence_path.parent.resolve()
+    for label, retained_path in (
+        ("World.tsv", tsv_path),
+        ("Elo receipt", receipt_path),
+    ):
+        try:
+            resolved = retained_path.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(f"cannot resolve retained {label}: {exc}") from exc
+        if (
+            retained_path.is_symlink()
+            or resolved.parent != evidence_directory
+            or not resolved.is_file()
+        ):
+            raise ValueError(
+                f"retained {label} must be a regular non-symlink file in "
+                "the pre-match evidence directory"
+            )
+    try:
+        raw = tsv_path.read_bytes()
+        receipt = load_elo_capture_receipt(
+            receipt_path,
+            source_tsv=tsv_path,
+            source_bytes=raw,
+            now_utc=frozen_at,
+        )
+        ratings = parse_world_tsv_bytes(raw, tsv_path)
+    except (OSError, EloSnapshotError) as exc:
+        raise ValueError(f"invalid retained Elo evidence: {exc}") from exc
+
+    age = frozen_at - receipt.response_completed_at_utc
+    if age < timedelta(0) or age > ENSEMBLE_MAX_ELO_AGE:
+        raise ValueError("pre-match Elo capture must be no more than 30 minutes old")
+    fetched_at = _required_utc_timestamp(
+        elo.get("fetched_at_utc"), "elo_provenance.fetched_at_utc"
+    )
+    if fetched_at != receipt.response_completed_at_utc:
+        raise ValueError("pre-match Elo fetched_at_utc does not match receipt")
+    if elo.get("source_sha256") != receipt.body_sha256:
+        raise ValueError("pre-match Elo source SHA-256 does not match receipt")
+    if elo.get("receipt_sha256") != receipt.receipt_sha256:
+        raise ValueError("pre-match Elo receipt SHA-256 does not match retained receipt")
+    if elo.get("body_byte_count") != receipt.body_byte_count:
+        raise ValueError("pre-match Elo byte count does not match retained response")
+
+    recorded_ratings = elo.get("ratings")
+    if not isinstance(recorded_ratings, dict):
+        raise ValueError("pre-match Elo provenance requires participant ratings")
+    for team in (home, away):
+        if team not in ratings or team not in recorded_ratings:
+            raise ValueError(f"pre-match Elo evidence is missing {team}")
+        try:
+            recorded = float(recorded_ratings[team])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"pre-match Elo rating for {team} is invalid") from exc
+        if recorded != float(ratings[team]):
+            raise ValueError(f"pre-match Elo rating for {team} does not match World.tsv")
+    estimates = elo.get("estimates")
+    if not isinstance(estimates, list) or any(
+        not isinstance(team, str) for team in estimates
+    ):
+        raise ValueError("pre-match Elo estimates must be a list of team names")
+    estimated_participants = sorted({home, away}.intersection(estimates))
+    if estimated_participants:
+        raise ValueError(
+            "estimated Elo is ineligible for ensemble review: "
+            + ", ".join(estimated_participants)
+        )
+    return {team: float(ratings[team]) for team in (home, away)}
+
+
+def _validate_freeze_timing_anchor(
+    payload: dict[str, Any],
+    payload_sha256: str,
+    *,
+    frozen_at: datetime,
+    kickoff: datetime,
+    trusted_anchor_resolver: TrustedAnchorResolver | None,
+) -> None:
+    reference = payload.get("timing_anchor")
+    if not isinstance(reference, dict):
+        raise ValueError("ensemble freeze requires timing_anchor")
+    source = reference.get("source")
+    anchor_id = reference.get("anchor_id")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("ensemble freeze timing_anchor.source must be non-empty")
+    if not isinstance(anchor_id, str) or not anchor_id.strip():
+        raise ValueError("ensemble freeze timing_anchor.anchor_id must be non-empty")
+    source = source.strip()
+    anchor_id = anchor_id.strip()
+    if trusted_anchor_resolver is None:
+        raise ValueError(
+            "ensemble freeze requires an external trusted timing-anchor resolver"
+        )
+    try:
+        anchor = trusted_anchor_resolver(source, anchor_id)
+    except (LookupError, OSError) as exc:
+        raise ValueError(
+            f"cannot resolve trusted timing anchor {source}:{anchor_id}: {exc}"
+        ) from exc
+    if not isinstance(anchor, TrustedTimingAnchor):
+        raise ValueError("trusted timing-anchor resolver returned an invalid record")
+    if anchor.source != source or anchor.anchor_id != anchor_id:
+        raise ValueError("trusted timing anchor identity does not match freeze reference")
+    if not _is_sha256(anchor.payload_sha256):
+        raise ValueError("trusted timing anchor has an invalid payload SHA-256")
+    if anchor.payload_sha256.lower() != payload_sha256:
+        raise ValueError("trusted timing anchor does not match freeze payload SHA-256")
+    observed_at = anchor.observed_at_utc
+    if (
+        not isinstance(observed_at, datetime)
+        or observed_at.tzinfo is None
+        or observed_at.utcoffset() is None
+    ):
+        raise ValueError("trusted timing anchor observed_at_utc must include timezone")
+    observed_at = observed_at.astimezone(timezone.utc)
+    if observed_at < frozen_at:
+        raise ValueError("trusted timing anchor predates the declared freeze time")
+    if observed_at >= kickoff:
+        raise ValueError("trusted timing anchor was observed at/after kickoff")
+
+
+def _replay_freeze_model(
+    model_basis: object,
+    context_basis: object,
+    ratings: dict[str, float],
+    *,
+    home: str,
+    away: str,
+) -> dict[str, Any]:
+    from match_context import MatchContext, WEATHER_DECISION_SCALES
+    from predict_jul11 import KO, _predict
+
+    if not isinstance(model_basis, dict):
+        raise ValueError("ensemble freeze requires structured model_basis")
+    _require_exact_keys(
+        model_basis,
+        {"engine", "profile", "parameters"},
+        "model_basis",
+    )
+    if model_basis.get("engine") != ENSEMBLE_MODEL_ENGINE:
+        raise ValueError(
+            f"ensemble freeze model_basis.engine must be {ENSEMBLE_MODEL_ENGINE}"
+        )
+    if model_basis.get("profile") != ENSEMBLE_MODEL_PROFILE:
+        raise ValueError(
+            f"ensemble freeze model_basis.profile must be {ENSEMBLE_MODEL_PROFILE}"
+        )
+    parameters = model_basis.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ValueError("ensemble freeze requires model_basis.parameters")
+    _require_exact_keys(
+        parameters,
+        {*ENSEMBLE_MODEL_PARAMETER_KEYS, "style_threshold"},
+        "model_basis.parameters",
+    )
+    for key in ENSEMBLE_MODEL_PARAMETER_KEYS:
+        actual = _required_finite_number(
+            parameters.get(key), f"model_basis.parameters.{key}"
+        )
+        if actual != float(KO[key]):
+            raise ValueError(
+                f"ensemble freeze model parameter {key} does not match the frozen profile"
+            )
+    style_threshold = _required_finite_number(
+        parameters.get("style_threshold"),
+        "model_basis.parameters.style_threshold",
+        positive=True,
+    )
+    if style_threshold != ENSEMBLE_MODEL_STYLE_THRESHOLD:
+        raise ValueError(
+            "ensemble freeze model parameter style_threshold does not match "
+            "the frozen profile"
+        )
+
+    if not isinstance(context_basis, dict):
+        raise ValueError("ensemble freeze requires structured context_basis")
+    _require_exact_keys(context_basis, {"weather", "lineup"}, "context_basis")
+    weather = context_basis.get("weather")
+    lineup = context_basis.get("lineup")
+    if not isinstance(weather, dict) or not isinstance(lineup, dict):
+        raise ValueError(
+            "ensemble freeze requires structured weather and lineup context basis"
+        )
+    _require_exact_keys(weather, {"decision", "scale"}, "context_basis.weather")
+    _require_exact_keys(
+        lineup,
+        {"home_scale", "away_scale"},
+        "context_basis.lineup",
+    )
+    weather_decision = weather.get("decision")
+    if not isinstance(weather_decision, str) or weather_decision not in WEATHER_DECISION_SCALES:
+        raise ValueError("ensemble freeze weather decision is invalid")
+    weather_scale = _required_finite_number(
+        weather.get("scale"), "context_basis.weather.scale", positive=True
+    )
+    if weather_scale != WEATHER_DECISION_SCALES[weather_decision]:
+        raise ValueError(
+            "ensemble freeze weather scale does not match the recorded decision"
+        )
+    lineup_home = _required_finite_number(
+        lineup.get("home_scale"), "context_basis.lineup.home_scale", positive=True
+    )
+    lineup_away = _required_finite_number(
+        lineup.get("away_scale"), "context_basis.lineup.away_scale", positive=True
+    )
+    return _predict(
+        home,
+        away,
+        ratings,
+        MatchContext(
+            weather_scale=weather_scale,
+            weather_decision=weather_decision,
+            lineup_home=lineup_home,
+            lineup_away=lineup_away,
+        ),
+    )
+
+
+def _validate_freeze_market(
+    market: object,
+    *,
+    frozen_at: datetime,
+    reference_side: str,
+    recorded_probability: float,
+    expected_draw_resolution_home: float,
+) -> None:
+    if not isinstance(market, dict):
+        raise ValueError("ensemble freeze requires market_evidence")
+    source = market.get("source")
+    if not isinstance(source, str) or not _is_http_url(source):
+        raise ValueError("ensemble freeze market source must be HTTP(S)")
+    captured_at = _required_utc_timestamp(
+        market.get("captured_at_utc"), "market_evidence.captured_at_utc"
+    )
+    if captured_at > frozen_at:
+        raise ValueError("ensemble freeze market evidence was captured after freeze")
+    method = market.get("demargin_method")
+    advance_method = market.get("advance_method")
+    odds_raw = market.get("odds")
+    if not isinstance(odds_raw, list):
+        raise ValueError("ensemble freeze market odds must be a list")
+    try:
+        odds = tuple(float(value) for value in odds_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ensemble freeze market odds are invalid") from exc
+
+    from match_context import de_margin_odds, de_margin_two_way_odds
+
+    try:
+        if advance_method == "direct_two_way":
+            probabilities, _ = de_margin_two_way_odds(odds, method=str(method))
+            home_probability = probabilities[0]
+        elif advance_method == "derived_from_90":
+            probabilities, _ = de_margin_odds(odds, method=str(method))
+            draw_resolution_home = _check_probability(
+                float(market.get("draw_resolution_home")),
+                "market_evidence.draw_resolution_home",
+            )
+            if abs(draw_resolution_home - expected_draw_resolution_home) > 1e-9:
+                raise ValueError(
+                    "market_evidence.draw_resolution_home does not match the "
+                    "replayed frozen model"
+                )
+            home_probability = probabilities[0] + probabilities[1] * draw_resolution_home
+        else:
+            raise ValueError(
+                "ensemble freeze market advance_method must be direct_two_way "
+                "or derived_from_90"
+            )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid ensemble freeze market evidence: {exc}") from exc
+    calculated = (
+        home_probability if reference_side == "H" else 1.0 - home_probability
+    )
+    _require_exact_probability_match(
+        calculated, recorded_probability, "ensemble freeze market probability"
+    )
+
+
+def _validate_ensemble_pre_match_evidence(
+    ledger_path: Path,
+    evidence_ref: str,
+    *,
+    stage: str,
+    home: str,
+    away: str,
+    fixture_date: date,
+    reference_side: str,
+    p_model: float,
+    p_market: float,
+    p_ensemble: float,
+    trusted_anchor_resolver: TrustedAnchorResolver | None,
+) -> None:
+    evidence_path = _resolve_ledger_evidence(
+        ledger_path, evidence_ref, "pre_match_evidence"
+    )
+    payload, payload_sha256 = _load_pre_match_envelope(evidence_path)
+    fixture = payload.get("fixture")
+    if not isinstance(fixture, dict):
+        raise ValueError("pre-match evidence requires fixture identity")
+    if (
+        _normalized_stage(fixture.get("stage")) != _normalized_stage(stage)
+        or fixture.get("home") != home
+        or fixture.get("away") != away
+    ):
+        raise ValueError("pre-match evidence fixture does not match ensemble ledger")
+    kickoff = _required_utc_timestamp(
+        fixture.get("kickoff_at_utc"), "fixture.kickoff_at_utc"
+    )
+    if fixture_date != kickoff.date():
+        raise ValueError("pre-match evidence kickoff date does not match ledger date")
+    if payload.get("live_match_state_incorporated") is not False:
+        raise ValueError("pre-match evidence must declare no live match state")
+
+    artifact_type = payload.get("artifact_type")
+    if artifact_type == ENSEMBLE_FREEZE_ARTIFACT_TYPE:
+        from predict_jul11 import FIXTURES
+
+        if payload.get("schema_version") != ENSEMBLE_FREEZE_SCHEMA_VERSION:
+            raise ValueError("unsupported ensemble freeze schema_version")
+        slug = fixture.get("slug")
+        canonical_fixture = FIXTURES.get(slug) if isinstance(slug, str) else None
+        if canonical_fixture is None or any(
+            (
+                fixture.get("fixture_id") != canonical_fixture.fixture_id,
+                fixture.get("stage") != canonical_fixture.stage,
+                fixture.get("home") != canonical_fixture.home,
+                fixture.get("away") != canonical_fixture.away,
+                fixture.get("kickoff_at_utc") != canonical_fixture.kickoff_at_utc,
+            )
+        ):
+            raise ValueError(
+                "ensemble freeze fixture does not match the canonical fixture registry"
+            )
+        frozen_at = _required_utc_timestamp(
+            payload.get("frozen_at_utc"), "frozen_at_utc"
+        )
+        if frozen_at >= kickoff:
+            raise ValueError("ensemble freeze must be created before kickoff")
+        _validate_freeze_timing_anchor(
+            payload,
+            payload_sha256,
+            frozen_at=frozen_at,
+            kickoff=kickoff,
+            trusted_anchor_resolver=trusted_anchor_resolver,
+        )
+        if payload.get("reference_side") != reference_side:
+            raise ValueError("ensemble freeze reference_side does not match ledger")
+        probabilities = payload.get("probabilities")
+        if not isinstance(probabilities, dict):
+            raise ValueError("ensemble freeze requires probabilities")
+        evidence_model = _check_probability(
+            float(probabilities.get("model")), "ensemble freeze model probability"
+        )
+        evidence_market = _check_probability(
+            float(probabilities.get("market")), "ensemble freeze market probability"
+        )
+        evidence_ensemble = _check_probability(
+            float(probabilities.get("ensemble")), "ensemble freeze ensemble probability"
+        )
+        expected_ensemble = (
+            ENSEMBLE_MODEL_WEIGHT * evidence_model
+            + (1.0 - ENSEMBLE_MODEL_WEIGHT) * evidence_market
+        )
+        _require_exact_probability_match(
+            expected_ensemble,
+            evidence_ensemble,
+            "ensemble freeze blended probability",
+        )
+        ratings = _validate_retained_elo(
+            evidence_path,
+            payload.get("elo_provenance"),
+            home=home,
+            away=away,
+            frozen_at=frozen_at,
+        )
+        replay = _replay_freeze_model(
+            payload.get("model_basis"),
+            payload.get("context_basis"),
+            ratings,
+            home=home,
+            away=away,
+        )
+        replayed_model = _probability_for_reference(
+            replay["advance_home"],
+            reference_side,
+            "replayed ensemble freeze model.advance_home",
+        )
+        _require_exact_probability_match(
+            replayed_model,
+            evidence_model,
+            "ensemble freeze model probability",
+        )
+        _validate_freeze_market(
+            payload.get("market_evidence"),
+            frozen_at=frozen_at,
+            reference_side=reference_side,
+            recorded_probability=evidence_market,
+            expected_draw_resolution_home=float(replay["draw_resolution_home"]),
+        )
+    else:
+        from predict_jul11 import ArtifactError, _load_artifact
+
+        generated_raw = payload.get("generated_at_utc")
+        frozen_at = _required_utc_timestamp(generated_raw, "generated_at_utc")
+        if frozen_at >= kickoff:
+            raise ValueError("official pre-match artifact was generated at/after kickoff")
+        try:
+            loaded_fixture, _official_probability, _digest = _load_artifact(
+                evidence_path, now=kickoff
+            )
+        except ArtifactError as exc:
+            raise ValueError(f"invalid official pre-match artifact: {exc}") from exc
+        if loaded_fixture.home != home or loaded_fixture.away != away:
+            raise ValueError("official pre-match artifact fixture does not match ledger")
+        model = payload.get("model")
+        market = payload.get("market")
+        official = payload.get("official")
+        if (
+            not isinstance(model, dict)
+            or not isinstance(market, dict)
+            or not isinstance(official, dict)
+        ):
+            raise ValueError("official pre-match artifact is missing probabilities")
+        evidence_model = _probability_for_reference(
+            model.get("advance_home"), reference_side, "artifact model.advance_home"
+        )
+        evidence_market = _probability_for_reference(
+            market.get("advance_home"), reference_side, "artifact market.advance_home"
+        )
+        evidence_ensemble = _probability_for_reference(
+            official.get("advance_home"), reference_side, "artifact official.advance_home"
+        )
+        expected_ensemble = (
+            ENSEMBLE_MODEL_WEIGHT * evidence_model
+            + (1.0 - ENSEMBLE_MODEL_WEIGHT) * evidence_market
+        )
+        _require_exact_probability_match(
+            expected_ensemble,
+            evidence_ensemble,
+            "official artifact blended probability",
+        )
+        _validate_retained_elo(
+            evidence_path,
+            payload.get("elo_provenance"),
+            home=home,
+            away=away,
+            frozen_at=frozen_at,
+        )
+    _require_probability_match(evidence_model, p_model, "ensemble model probability")
+    _require_probability_match(evidence_market, p_market, "ensemble market probability")
+    _require_probability_match(evidence_ensemble, p_ensemble, "ensemble blended probability")
+
+
 @dataclass(frozen=True)
 class EnsembleGridPoint:
     model_weight: float
@@ -819,81 +1514,15 @@ class EnsembleBasisSummary:
     decision: str
 
 
-def summarize_ensemble_basis(
-    path: str | Path,
+def _summarize_ensemble_probabilities(
+    eligible: Sequence[tuple[float, float, float]],
     *,
-    live_basis: str = "live_current_elo",
-    minimum_for_refit: int = 12,
-    current_weight: float = 0.6,
+    total_rows: int,
+    basis_counts: dict[str, int],
+    minimum_for_refit: int,
+    current_weight: float,
 ) -> EnsembleBasisSummary:
-    """Validate prospective live-basis rows and refit only at the n=12 gate.
-
-    Historical ``mixed_legacy`` and counterfactual rows remain visible in the
-    basis counts but never enter either the eligible n or the weight grid.
-    """
-    _check_probability(current_weight, "current_weight")
-    if minimum_for_refit <= 0:
-        raise ValueError("minimum_for_refit must be positive")
-    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
-        rows = list(csv.DictReader(handle))
-    counts: dict[str, int] = {}
-    eligible: list[tuple[float, float, float]] = []
-    fixture_keys: set[tuple[str, str, str]] = set()
-    for line, row in enumerate(rows, 2):
-        basis = str(row.get("basis", "")).strip()
-        if not basis:
-            raise ValueError(f"ensemble ledger line {line}: missing basis")
-        counts[basis] = counts.get(basis, 0) + 1
-        if basis != live_basis:
-            continue
-
-        date = str(row.get("date", "")).strip()
-        stage = str(row.get("stage", "")).strip()
-        home = str(row.get("home", "")).strip()
-        away = str(row.get("away", "")).strip()
-        try:
-            datetime.fromisoformat(date)
-        except ValueError as exc:
-            raise ValueError(
-                f"ensemble ledger line {line}: date must be ISO-8601"
-            ) from exc
-        if not stage or not home or not away or home == away:
-            raise ValueError(f"ensemble ledger line {line}: invalid fixture identity")
-        fixture_key = (stage, home, away)
-        if fixture_key in fixture_keys:
-            raise ValueError(f"ensemble ledger line {line}: duplicate live fixture")
-        fixture_keys.add(fixture_key)
-
-        if str(row.get("fav_side", "")).strip() not in {"H", "A"}:
-            raise ValueError(f"ensemble ledger line {line}: fav_side must be H or A")
-        outcome_raw = str(row.get("advanced_fav", "")).strip()
-        if outcome_raw not in {"0", "1"}:
-            raise ValueError(
-                f"ensemble ledger line {line}: advanced_fav must be settled as 0 or 1"
-            )
-        outcome = float(outcome_raw)
-        p_model = _check_probability(
-            float(row["p_model_currelo"]), f"ensemble line {line} p_model_currelo"
-        )
-        p_market = _check_probability(
-            float(row["p_market"]), f"ensemble line {line} p_market"
-        )
-        p_recorded = _check_probability(
-            float(row["p_ensemble"]), f"ensemble line {line} p_ensemble"
-        )
-
-        for field, probability in (
-            ("brier_model", p_model),
-            ("brier_market", p_market),
-            ("brier_ensemble", p_recorded),
-        ):
-            recorded = float(row[field])
-            expected = (probability - outcome) ** 2
-            if abs(recorded - expected) > 0.0015:
-                raise ValueError(
-                    f"ensemble ledger line {line}: {field} does not match settled outcome"
-                )
-        eligible.append((p_model, p_market, outcome))
+    """Summarize already-admitted rows without weakening ledger admission."""
 
     live_rows = len(eligible)
     current_brier = _mean([
@@ -925,10 +1554,10 @@ def summarize_ensemble_basis(
         best_weight = best.model_weight
         best_brier = best.brier
     return EnsembleBasisSummary(
-        total_rows=len(rows),
+        total_rows=total_rows,
         live_rows=live_rows,
-        excluded_rows=len(rows) - live_rows,
-        basis_counts=counts,
+        excluded_rows=total_rows - live_rows,
+        basis_counts=dict(basis_counts),
         minimum_for_refit=minimum_for_refit,
         current_weight=current_weight,
         current_brier=current_brier,
@@ -936,4 +1565,148 @@ def summarize_ensemble_basis(
         best_brier=best_brier,
         grid=grid,
         decision="REVIEW_REFIT" if grid else "HOLD_W_0_6",
+    )
+
+
+def summarize_ensemble_basis(
+    path: str | Path,
+    *,
+    live_basis: str = "live_current_elo",
+    minimum_for_refit: int = 12,
+    current_weight: float = 0.6,
+    trusted_anchor_resolver: TrustedAnchorResolver | None = None,
+) -> EnsembleBasisSummary:
+    """Validate prospective live-basis rows and refit only at the n=12 gate.
+
+    Historical ``mixed_legacy`` and counterfactual rows remain visible in the
+    basis counts but never enter either the eligible n or the weight grid.
+    Sealed freeze records default to ineligible unless the caller supplies an
+    external ``trusted_anchor_resolver``; official artifacts do not use that
+    resolver. Repository-local timestamps and hashes are never auto-trusted.
+    """
+    _check_probability(current_weight, "current_weight")
+    if minimum_for_refit <= 0:
+        raise ValueError("minimum_for_refit must be positive")
+    ledger_path = Path(path)
+    with ledger_path.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    counts: dict[str, int] = {}
+    eligible: list[tuple[float, float, float]] = []
+    fixture_keys: set[tuple[str, str, str]] = set()
+    for line, row in enumerate(rows, 2):
+        basis = str(row.get("basis", "")).strip()
+        if not basis:
+            raise ValueError(f"ensemble ledger line {line}: missing basis")
+        counts[basis] = counts.get(basis, 0) + 1
+        if basis != live_basis:
+            continue
+
+        date = str(row.get("date", "")).strip()
+        stage = str(row.get("stage", "")).strip()
+        home = str(row.get("home", "")).strip()
+        away = str(row.get("away", "")).strip()
+        try:
+            fixture_date = datetime.fromisoformat(date)
+        except ValueError as exc:
+            raise ValueError(
+                f"ensemble ledger line {line}: date must be ISO-8601"
+            ) from exc
+        if not stage or not home or not away or home == away:
+            raise ValueError(f"ensemble ledger line {line}: invalid fixture identity")
+        fixture_key = (_normalized_stage(stage), home, away)
+        if fixture_key in fixture_keys:
+            raise ValueError(f"ensemble ledger line {line}: duplicate live fixture")
+        fixture_keys.add(fixture_key)
+
+        # ``fav_side`` is the legacy name.  The probabilities and outcome are
+        # defined against a reference side, which need not be the model's
+        # favourite when model and market disagree.
+        reference_side = str(row.get("reference_side", "")).strip()
+        legacy_side = str(row.get("fav_side", "")).strip()
+        if reference_side and legacy_side and reference_side != legacy_side:
+            raise ValueError(
+                f"ensemble ledger line {line}: reference_side conflicts "
+                "with legacy fav_side"
+            )
+        if not reference_side:
+            reference_side = legacy_side
+        if reference_side not in {"H", "A"}:
+            raise ValueError(
+                f"ensemble ledger line {line}: reference_side "
+                "(or legacy fav_side) must be H or A"
+            )
+        outcome_raw = str(row.get("advanced_reference", "")).strip()
+        legacy_outcome = str(row.get("advanced_fav", "")).strip()
+        if outcome_raw and legacy_outcome and outcome_raw != legacy_outcome:
+            raise ValueError(
+                f"ensemble ledger line {line}: advanced_reference conflicts "
+                "with legacy advanced_fav"
+            )
+        if not outcome_raw:
+            outcome_raw = legacy_outcome
+        if outcome_raw not in {"0", "1"}:
+            raise ValueError(
+                f"ensemble ledger line {line}: reference outcome "
+                "(advanced_reference or legacy advanced_fav) must be settled as 0 or 1"
+            )
+        outcome = float(outcome_raw)
+        p_model = _check_probability(
+            float(row["p_model_currelo"]), f"ensemble line {line} p_model_currelo"
+        )
+        p_market = _check_probability(
+            float(row["p_market"]), f"ensemble line {line} p_market"
+        )
+        p_recorded = _check_probability(
+            float(row["p_ensemble"]), f"ensemble line {line} p_ensemble"
+        )
+        historical_fixture_key = (fixture_date.date(), *fixture_key)
+        provenance_required = (
+            fixture_date.date() >= ENSEMBLE_PROVENANCE_EFFECTIVE_DATE
+            or historical_fixture_key not in ENSEMBLE_PRE_POLICY_LIVE_FIXTURES
+        )
+        if provenance_required:
+            evidence_ref = str(row.get("pre_match_evidence", "")).strip()
+            if not evidence_ref:
+                raise ValueError(
+                    f"ensemble ledger line {line}: post-policy live row requires "
+                    "pre_match_evidence"
+                )
+            try:
+                _validate_ensemble_pre_match_evidence(
+                    ledger_path,
+                    evidence_ref,
+                    stage=stage,
+                    home=home,
+                    away=away,
+                    fixture_date=fixture_date.date(),
+                    reference_side=reference_side,
+                    p_model=p_model,
+                    p_market=p_market,
+                    p_ensemble=p_recorded,
+                    trusted_anchor_resolver=trusted_anchor_resolver,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"ensemble ledger line {line}: invalid pre_match_evidence: {exc}"
+                ) from exc
+
+        for field, probability in (
+            ("brier_model", p_model),
+            ("brier_market", p_market),
+            ("brier_ensemble", p_recorded),
+        ):
+            recorded = float(row[field])
+            expected = (probability - outcome) ** 2
+            if abs(recorded - expected) > 0.0015:
+                raise ValueError(
+                    f"ensemble ledger line {line}: {field} does not match settled outcome"
+                )
+        eligible.append((p_model, p_market, outcome))
+
+    return _summarize_ensemble_probabilities(
+        eligible,
+        total_rows=len(rows),
+        basis_counts=counts,
+        minimum_for_refit=minimum_for_refit,
+        current_weight=current_weight,
     )

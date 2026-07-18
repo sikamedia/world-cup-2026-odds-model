@@ -149,6 +149,17 @@ def _parse_roof_status(raw: str | None) -> str | None:
     return value
 
 
+def _parse_weather_capture_method(raw: str | None) -> str | None:
+    if raw is None or raw == "":
+        return None
+    allowed = {"direct_http_response_body", "workspace_web_fetch"}
+    if raw not in allowed:
+        raise ValueError(
+            f"weather_capture_method must be one of: {', '.join(sorted(allowed))}"
+        )
+    return raw
+
+
 def _parse_competition_state(row: dict[str, str]) -> dict | None:
     raw = _first_non_empty(row, ["competition_state"])
     if raw is None:
@@ -216,6 +227,32 @@ def _parse_row(row: dict[str, str], source_label: str) -> tuple[str, dict, str]:
     weather_evidence_sha256 = _first_non_empty(row, ["weather_evidence_sha256"])
     if weather_evidence_sha256 is not None:
         payload["weather_evidence_sha256"] = weather_evidence_sha256
+    weather_capture_method = _parse_weather_capture_method(
+        row.get("weather_capture_method")
+    )
+    if weather_capture_method is not None:
+        payload["weather_capture_method"] = weather_capture_method
+    weather_points_source = _first_non_empty(row, ["weather_points_source"])
+    if weather_points_source is not None:
+        payload["weather_points_source"] = weather_points_source
+    weather_points_evidence_snapshot = row.get("weather_points_evidence_snapshot")
+    if (
+        weather_points_evidence_snapshot is not None
+        and weather_points_evidence_snapshot.strip()
+    ):
+        payload["weather_points_evidence_snapshot"] = weather_points_evidence_snapshot
+    weather_points_evidence_sha256 = _first_non_empty(
+        row,
+        ["weather_points_evidence_sha256"],
+    )
+    if weather_points_evidence_sha256 is not None:
+        payload["weather_points_evidence_sha256"] = weather_points_evidence_sha256
+    weather_forecast_generated_at_utc = _first_non_empty(
+        row,
+        ["weather_forecast_generated_at_utc", "weather_forecast_generated_utc"],
+    )
+    if weather_forecast_generated_at_utc is not None:
+        payload["weather_forecast_generated_at_utc"] = weather_forecast_generated_at_utc
     weather_decision = _parse_weather_decision(_first_non_empty(row, ["weather_decision"]))
     if weather_decision is not None:
         payload["weather_decision"] = weather_decision

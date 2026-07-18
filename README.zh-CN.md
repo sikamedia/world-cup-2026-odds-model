@@ -42,6 +42,8 @@
 |-- backtest_ko.py                  (淘汰赛批次，随比赛进行扩充)
 |-- predict_r32.py                  (32 强赛晋级表)
 |-- predict_bracket.py              (整个对阵树的冠军 / 深度晋级概率)
+|-- capture_elo_evidence.py         (不可覆盖的 World.tsv 直接抓取 + receipt)
+|-- fetch_elo_current.py            (经 receipt 校验的当前 Elo 模块)
 |-- create_context_template.py
 |-- fetch_the_odds_api.py
 |-- import_context_csv.py
@@ -125,22 +127,69 @@ export ODDS_API_SPORT_KEY="..."
 
 不要提交 API key、`.env` 文件或包含私有账号信息的录制 payload。
 
+daily 预览和官方运行的当前 Elo 必须来自同一条直接响应抓取路径：
+
+```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260714T1605Z.tsv \
+  --receipt-out evidence/World_20260714T1605Z.receipt.json \
+  --timeout-seconds 30
+
+python3 fetch_elo_current.py \
+  --tsv evidence/World_20260714T1605Z.tsv \
+  --receipt evidence/World_20260714T1605Z.receipt.json \
+  --out elo_current_latest.py \
+  --required-team France \
+  --required-team Spain
+```
+
+抓取器将 HTTP 响应正文原始字节及 receipt 写入新的、不可覆盖的路径。不得复制或
+复用旧 TSV，不得从解析数据重建、转码或规范化换行。receipt 记录响应完成时间、
+字节数和 SHA-256。抓取失败时 daily 不生成 Elo 预览；官方 finalization 还会拒绝
+响应完成时间超过 30 分钟的证据。
+
 天气调整属于可审计 context，不是模型参数。当前预测必须记录开球/检查/预报
 签发与有效时间、HTTP(S) 来源、证据类型、证据正文及其 SHA-256、决策和缩放值。
 热调只接受开球前 6 小时内且覆盖开球小时的预报；签发时间距检查不得超过 24
 小时；`rain_applied` 只接受 3 小时内的 hourly/radar 证据。缺失或过期证据是
 阻断错误，不再只是 warning。
 
+室外 `api.weather.gov` 证据必须同时保留 points 响应，以及从其精确
+`properties.forecastHourly` URL 跟随取得的 hourly 响应。points 响应的 `id`
+（或 `properties.@id`）必须与声明的 points URL 一致。记录
+`weather_capture_method=direct_http_response_body|workspace_web_fetch`，必须逐字
+匹配，不接受大小写、空白或连字符别名；并记录
+`weather_points_source`、`weather_points_evidence_snapshot` 和
+`weather_points_evidence_sha256`。只有 hourly `properties.updateTime` 可作为预报
+签发时间；`generatedAt` 必须单独写入 `weather_forecast_generated_at_utc`。hourly
+period 中必须存在 `startTime <= kickoff < endTime` 的真实时段。
+`workspace_web_fetch` 只代表可审计的工具文本快照，不代表原始 HTTP 响应字节或
+字节级同一性。
+schema 4 从三四名赛和决赛 artifact 起验证该 provenance 链和开球时段覆盖，
+不会从预报数值自动推导 `heat_*` 或 `rain_*` 决策，也不会改变冻结的天气调整映射。
+
 `indoor_no_weather` 只接受开球前 6 小时内核查的官方、对应场次的顶棚证据，且
 必须记录 `roof_status=closed` 和所选场次精确的
 `weather_evidence_fixture_id`。场馆有可开合顶棚本身不构成室内证据。
 
 半决赛使用 `create_context_template.py --source sf_jul14_15 --fixture <slug>`
-分别生成单场模板，填入证据后以 `--require-weather-evidence --context-only`
-导入验证。`predict_jul11.py finalize` 为该场写出带 stage、schema-2、规范化哈希
-且不可覆盖的终版 artifact；直接两路晋级盘优先，否则明确使用 90 分钟盘口
-fallback。历史 `predict_jul11.py mc` 路径仍只接受两场 QF artifact。外部任务
-正文与终版运行时点见
+分别生成单场模板，填入证据后以
+`--require-weather-evidence --context-only`
+导入验证。`predict_jul11.py finalize` 和 `predict_jul11.py mc` 均须传入匹配的
+`--elo-receipt`；QF/SF finalization 为该场写出带 stage、schema-3、
+`direct_http_v1` provenance、规范化哈希且不可覆盖的终版 artifact。三四名赛/决赛
+启用 schema 4，并强制 `--require-structured-weather`；只有 SF102 赛果确定后才注册
+真实参赛队，不预造队伍。直接两路
+晋级盘优先，否则明确使用 90 分钟盘口 fallback。历史 `predict_jul11.py mc`
+路径仍只接受两场 QF artifact，schema 1-4 仅在各自允许的 stage 可读取。
+France-Spain 及以前的 11 个 `live_current_elo` 场次被明确 grandfather；任何新场次
+只有在 `pre_match_evidence` 指向 `evidence/` 下已验证的官方 artifact 或密封赛前 freeze 时才计数。
+该证据必须绑定新鲜 direct-Elo 字节/receipt 与冻结的模型、市场概率；赛后重建一律拒绝。
+freeze 默认不计数；调用方必须提供外部可信 resolver，返回匹配的来源、anchor ID、
+payload digest，且观察时间满足 `frozen_at <= observed_at < kickoff`。验证器还会用
+`predict_jul11._predict/v1` 和精确冻结的淘汰赛、天气、阵容 basis 重放模型。官方
+artifact 不使用这一 freeze 专属 resolver。
+外部任务正文与终版运行时点见
 [AUTOMATION_RUNBOOK.md](AUTOMATION_RUNBOOK.md)。
 淘汰赛冻结、风格 cohort、点球和主场口径见
 [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md)。
@@ -157,6 +206,7 @@ python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
   --elo-module elo_current_latest.py \
   --elo-source-tsv evidence/World.tsv \
+  --elo-receipt evidence/World.receipt.json \
   --output-csv /tmp/paper_signals.csv \
   --append-ledger paper_bet_ledger.csv \
   --date 2026-07-05 \
@@ -164,9 +214,10 @@ python3 generate_paper_signals.py \
 ```
 
 `generate_paper_signals.py` 默认从 `elo_current_latest.py` 读取预测侧 Elo，并强制
-校验 World.tsv 来源、SHA-256、24 小时新鲜度、目标球队覆盖和 `ESTIMATES=[]`。
-任何失败都会在写出 CSV 前退出。小组赛标签选择 `group_v37a`；淘汰赛标签选择
-`knockout_locked`。`--elo-source snapshot` 只用于历史回放。
+校验 direct-HTTP receipt、World.tsv 来源、SHA-256、24 小时新鲜度、目标球队覆盖
+和 `ESTIMATES=[]`。任何失败都会在写出 CSV 前退出。小组赛标签选择
+`group_v37a`；淘汰赛标签选择 `knockout_locked`。`--elo-source snapshot` 只用于
+历史回放。
 
 默认闸门：
 
@@ -182,6 +233,7 @@ python3 generate_paper_signals.py \
   --context-file /tmp/jun26.merged.json \
   --elo-module elo_current_latest.py \
   --elo-source-tsv evidence/World.tsv \
+  --elo-receipt evidence/World.receipt.json \
   --output-csv /tmp/paper_signals.csv \
   --date 2026-07-05 \
   --stage R16 \

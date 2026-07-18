@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import sys
 
 from competition_state import match_state_summary
@@ -13,6 +14,7 @@ from match_context import (
     de_margin_two_way_odds,
     load_context_file,
     validate_weather_context,
+    weather_context_has_evidence,
 )
 from model_stability import PROFILE_REGISTRY, STABLE_V35, predict_match, resolve_profile
 from worldcup_2026_data import BATCH_SPLITS, ELO, JUNE_25_MATCHES, MATCHES_54, matches_for_batches
@@ -33,6 +35,23 @@ def _parse_profile(raw: str):
     except KeyError as exc:
         available = ", ".join(sorted(PROFILE_REGISTRY))
         raise argparse.ArgumentTypeError(f"{exc}. Available profiles: {available}") from exc
+
+
+def _parse_now_utc(raw: str) -> datetime:
+    normalized = raw.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        value = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "must be an ISO-8601 timestamp with timezone"
+        ) from exc
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise argparse.ArgumentTypeError(
+            "must be an ISO-8601 timestamp with timezone"
+        )
+    return value.astimezone(timezone.utc)
 
 
 def _known_slates() -> dict[str, list[tuple[str, str]]]:
@@ -124,7 +143,24 @@ def main() -> None:
         action="store_true",
         help="Require complete auditable weather evidence for every context row, including scale=1.00.",
     )
+    ap.add_argument(
+        "--require-structured-weather",
+        action="store_true",
+        help="Require the schema-4 capture method and structured NWS points/hourly chain.",
+    )
+    ap.add_argument(
+        "--now-utc",
+        type=_parse_now_utc,
+        help=(
+            "Validation run time as an ISO-8601 timestamp. Defaults to current UTC and "
+            "is applied only with --require-structured-weather."
+        ),
+    )
     args = ap.parse_args()
+
+    structured_weather_now = None
+    if args.require_structured_weather:
+        structured_weather_now = args.now_utc or datetime.now(timezone.utc)
 
     try:
         contexts = load_context_file(args.context_file)
@@ -160,19 +196,7 @@ def main() -> None:
                 source_key_diff += 1
         if ctx.competition_state is not None:
             competition_states += 1
-        if (
-            ctx.weather_decision != "none"
-            or ctx.weather_evidence_type is not None
-            or ctx.weather_checked_at_utc is not None
-            or ctx.weather_forecast_issued_at_utc is not None
-            or ctx.weather_forecast_valid_at_utc is not None
-            or ctx.kickoff_at_utc is not None
-            or ctx.weather_source is not None
-            or ctx.weather_evidence_snapshot is not None
-            or ctx.weather_evidence_sha256 is not None
-            or ctx.roof_status is not None
-            or ctx.weather_evidence_fixture_id is not None
-        ):
+        if weather_context_has_evidence(ctx):
             weather_evidence_rows += 1
         home, away = key.split("|", 1)
         if home not in ELO:
@@ -183,9 +207,13 @@ def main() -> None:
         info = model_inputs.get(key)
         weather_issues = validate_weather_context(
             ctx,
-            require_evidence=args.require_weather_evidence,
+            require_evidence=(
+                args.require_weather_evidence or args.require_structured_weather
+            ),
             legacy_heat=info["heat"] if info else None,
+            now_utc=structured_weather_now,
             expected_fixture_id=FINALIZATION_FIXTURE_IDS.get(key),
+            require_structured_weather=args.require_structured_weather,
         )
         for issue in weather_issues:
             _add_issue(errors, key, issue)

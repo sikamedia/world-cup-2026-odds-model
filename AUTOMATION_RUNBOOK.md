@@ -10,13 +10,21 @@ a new isolated run.
 Include this block verbatim in the scheduled task body:
 
 ```text
-Elo source (fetch before every official prediction):
+Elo source (fetch before every daily preview and official prediction):
 https://www.eloratings.net/World.tsv
 
-Fetch and parse this source before producing official predictions. If fetch,
-parse, freshness, source-integrity, or required-team validation fails, stop the
-official prediction path. Do not substitute estimated Elo and do not publish a
-single-point official probability.
+Fetch this source through capture_elo_evidence.py before every daily preview and
+official prediction. The HTTP response body must be written directly and
+unmodified to a new create-only timestamped TSV; record the response-completion
+time, byte count, and SHA-256 in its create-only receipt. Do not copy or reuse a
+prior TSV, reconstruct it from parsed data, transcode it, or normalize its
+newlines. Parse only the TSV/receipt pair produced by that capture.
+
+If capture, receipt, parse, freshness, source-integrity, or required-team
+validation fails, stop the Elo path. A daily run must not produce an Elo-based
+preview. An official run must not publish a single-point probability. Official
+finalization requires the response-completion time to be no more than 30
+minutes old. Do not substitute estimated Elo or relax this age limit.
 
 Weather adjustments must use auditable kickoff-hour evidence. Heat evidence
 must be checked within 6 hours of kickoff. Applied rain requires hourly or
@@ -31,10 +39,58 @@ roof will be closed, including roof_status=closed, the selected fixture's exact
 weather_evidence_fixture_id, snapshot, SHA-256, source URL, and a check within
 6 hours of kickoff. Without that confirmation, use the outdoor kickoff-hour
 weather path and fail closed if it cannot be validated.
+
+Weather evidence source policy (adopted 2026-07-15, user-directed): the PRIMARY
+outdoor-forecast source is the api.weather.gov JSON API, NOT the
+forecast.weather.gov HTML pages. Procedure: fetch
+https://api.weather.gov/points/{lat},{lon} for the venue, follow the exact
+`properties.forecastHourly` URL from that live response (never guess gridpoint
+numbers), and retain BOTH JSON snapshots and their SHA-256 values. Record the
+points URL/snapshot/hash in weather_points_source,
+weather_points_evidence_snapshot, and weather_points_evidence_sha256; record
+the followed hourly URL/body/hash in the existing weather evidence fields.
+Require the points response `id` (or `properties.@id`) to equal the declared
+points URL, require the followed URL to equal properties.forecastHourly
+exactly, then select a real period whose startTime <= kickoff < endTime.
+
+Set weather_forecast_issued_at_utc exclusively from the hourly response's
+properties.updateTime. Record generatedAt separately as
+weather_forecast_generated_at_utc; it is response-generation metadata and MUST
+NOT be used to satisfy issuance freshness. Caller-supplied issue/valid times
+must equal the values derived from the retained JSON. Missing fields, a stale
+updateTime, a URL mismatch, no kickoff-covering period, or inconsistent
+caller-supplied timestamps fails closed.
+
+Record weather_capture_method as exactly direct_http_response_body or
+workspace_web_fetch; case, whitespace, and hyphen aliases are invalid. The
+former denotes retained direct HTTP response bytes.
+The latter is acceptable FOR THE WEATHER PATH ONLY and denotes an auditable
+workspace-tool text snapshot; it MUST NOT be described as a verbatim/raw HTTP
+response or as byte-identical to one. Rationale (2026-07-15 daily findings):
+forecast.weather.gov HTML pages arrive as STALE CACHES through the sandbox
+proxy (June issuances observed on match day) and must be rejected by the ≤24h
+issue-time check. If the sandbox allowlist blocks api.weather.gov (403
+blocked-by-allowlist observed 2026-07-15 07:05Z), workspace web_fetch remains
+weather-only. The literal points URL must be present in the scheduled task
+body; retain the dynamically discovered hourly URL in the context and evidence
+chain. Elo remains direct-capture-only; web_fetch can never satisfy the Elo
+contract.
+
+Schema 4 validates this source chain, freshness, and kickoff-period coverage
+for the third-place match and final. QF/SF artifacts remain schema 3, including
+any compliant SF102 retry before kickoff. Schema 4 does not infer a heat or rain
+category from forecast values and does not change the frozen weather adjustment
+mapping. The retained kickoff period must support the analyst's recorded
+decision.
 ```
 
 The URL appearing in a report or an interactive conversation does not update
 the scheduler's persistent provenance set.
+
+Do not register operational third-place or final fixtures until SF102 is
+settled and the real participants are known. At that point, add those real
+fixtures to the runner and template registries before scheduling their schema-4
+finalizations; synthetic teams are permitted only in tests.
 
 ## July 11 finalization incident (historical)
 
@@ -76,37 +132,94 @@ Each task body must include the persistent block above verbatim, so the literal
 must also state its fixed fixture, kickoff, scheduled run time, evidence paths,
 context/validation/finalize commands, and every fail-closed condition. A runbook
 entry alone does not create a scheduler task. New tasks do not inherit the daily
-task's permissions: pre-authorize the scheduler's HTTP fetch tool for each task
-so an unattended approval prompt cannot block the run. Create tasks through the
-official scheduler UI/API; never edit its internal JSON storage by hand.
+task's permissions: pre-authorize network execution of
+`python3 capture_elo_evidence.py` to `https://www.eloratings.net` for each task.
+Generic browser/web-fetch permission does not prove that the scheduled Python
+process has egress. Verify the exact capture command from a new isolated task
+before match day so an unattended approval prompt or proxy allowlist cannot
+block the run. Create tasks through the official scheduler UI/API; never edit
+its internal JSON storage by hand.
+
+Elo and weather egress are independent permissions. Pre-authorizing
+`python3 capture_elo_evidence.py` for `www.eloratings.net` does not authorize
+`api.weather.gov`, and a successful request to either host does not prove access
+to the other. Verify each required host from the scheduled-task environment and
+retain the scheduler execution log; an interactive-session request is not a
+substitute.
+
+Scheduler preflight captures are diagnostic only. Write them to create-only
+paths under `/tmp`, do not rename or reuse them as official evidence, and do not
+place them in the official evidence namespace. The finalization run must capture
+a new World.tsv response whose receipt is no more than 30 minutes old.
 
 ## Repository handoff
 
 For each finalization run:
 
-1. Save the raw Elo response as a timestamped TSV evidence file.
-2. Record the actual response-download time. Parse it with
-   `fetch_elo_current.py --fetched-at-utc`; parser execution time is not a
-   substitute for download time.
+1. Run `capture_elo_evidence.py` to write the direct, unmodified HTTP response
+   bytes to a new timestamped TSV and its matching create-only receipt. The
+   capture is the only supported current-data acquisition path; never copy,
+   reuse, reconstruct, transcode, or normalize an evidence file.
+2. Parse that exact TSV/receipt pair with `fetch_elo_current.py --receipt`. The
+   receipt's response-completion time is authoritative; parser execution time
+   and caller-supplied timestamps are not substitutes.
 3. Generate the fixture's one-match context template (`sf_jul14_15` for the
    semifinals), populate market and weather evidence, and retain every
-   referenced evidence snapshot. Prefer a direct two-way advancement market;
+   referenced evidence snapshot. For third-place/final schema 4, outdoor
+   api.weather.gov evidence retains the points response and the exact followed
+   hourly response as a verified chain; record its exact canonical capture
+   method without treating workspace web_fetch text as raw response bytes.
+   Prefer a direct two-way advancement market;
    if it is unavailable, retain the 90-minute 1X2 market used by the documented
    draw-resolution fallback.
-4. Run `validate_context.py`; any error blocks prediction.
+4. Run `validate_context.py --require-weather-evidence --now-utc <run-time>`;
+   add `--require-structured-weather` for third-place/final schema 4. Any error
+   blocks prediction. Supplying the run time makes future-evidence checks
+   reproducible.
 5. Run both `./run_tests.sh` and `python3 -m pytest -q`. Any failure blocks the
    official prediction path.
 6. Run `predict_jul11.py finalize`. It validates only the selected fixture and
    creates a read-only artifact at a new path. Existing artifacts are never
    overwritten.
 
-France vs Spain example (replace the illustrative fetch timestamp with the
-actual response-download time and populate the context before validation):
+Ensemble grading is a separate post-match step. The 11 live fixtures through
+France-Spain are the explicit pre-policy grandfather set. For every other
+fixture, append `basis=live_current_elo` only when the ledger's
+`pre_match_evidence` points under `evidence/` to either the valid official artifact or a sealed
+schema-1 `ensemble_pre_match_freeze` created before kickoff. A freeze is the
+fallback when later official-artifact checks fail; it is not a post-match
+reconstruction path. It must retain the fixture/kickoff/freeze time,
+`live_match_state_incorporated=false`, `reference_side`, model/market/ensemble
+probabilities, the direct-Elo TSV and receipt identities/hashes/ratings, the
+selected market source/capture time/odds/de-margin and advancement methods, and
+the model/weather/lineup basis. Elo must be no more than 30 minutes old at the
+freeze, and fixture identity/kickoff must match the canonical registry. Missing
+or mismatched evidence leaves the eligible count unchanged. A self-consistent
+payload hash is not proof of creation time: retain that hash in the append-only
+scheduler log or a pre-kickoff Git/WORM anchor. Grading defaults to rejection:
+the caller must supply `trusted_anchor_resolver`, which returns the matching
+source, anchor ID, payload digest, and an observation satisfying
+`frozen_at <= observed_at < kickoff`. Never derive this record from the local
+freeze. Official artifacts do not require the freeze-only resolver.
+
+The freeze must identify `predict_jul11._predict/v1`, the exact frozen knockout
+parameters (including `style_threshold=266`), and only the structured weather
+decision/scale plus home/away lineup scales. The validator replays the model
+from retained Elo, recomputes the selected market probability and any
+`derived_from_90` draw split, then verifies `reference_side` and frozen `w=0.6`.
+
+France vs Spain example (use new output paths for every attempt and populate the
+context before validation):
 
 ```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260714T1605Z.tsv \
+  --receipt-out evidence/World_20260714T1605Z.receipt.json \
+  --timeout-seconds 30
+
 python3 fetch_elo_current.py \
   --tsv evidence/World_20260714T1605Z.tsv \
-  --fetched-at-utc 2026-07-14T16:05:30Z \
+  --receipt evidence/World_20260714T1605Z.receipt.json \
   --out elo_sf101.py \
   --required-team France \
   --required-team Spain
@@ -124,11 +237,13 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/sf101.csv \
   --output-json /tmp/sf101.json \
   --require-weather-evidence \
+  --now-utc 2026-07-14T16:05:00Z \
   --context-only
 
 python3 validate_context.py \
   --context-file /tmp/sf101.json \
-  --require-weather-evidence
+  --require-weather-evidence \
+  --now-utc 2026-07-14T16:05:00Z
 
 ./run_tests.sh
 python3 -m pytest -q
@@ -137,6 +252,7 @@ python3 predict_jul11.py finalize \
   --fixture france-spain \
   --elo-module elo_sf101.py \
   --elo-source-tsv evidence/World_20260714T1605Z.tsv \
+  --elo-receipt evidence/World_20260714T1605Z.receipt.json \
   --context-file /tmp/sf101.json \
   --artifact-out evidence/sf101_20260714T1605Z.final.json
 ```
@@ -144,9 +260,14 @@ python3 predict_jul11.py finalize \
 England vs Argentina uses the same isolated flow on July 15:
 
 ```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260715T1605Z.tsv \
+  --receipt-out evidence/World_20260715T1605Z.receipt.json \
+  --timeout-seconds 30
+
 python3 fetch_elo_current.py \
   --tsv evidence/World_20260715T1605Z.tsv \
-  --fetched-at-utc 2026-07-15T16:05:30Z \
+  --receipt evidence/World_20260715T1605Z.receipt.json \
   --out elo_sf102.py \
   --required-team England \
   --required-team Argentina
@@ -164,11 +285,13 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/sf102.csv \
   --output-json /tmp/sf102.json \
   --require-weather-evidence \
+  --now-utc 2026-07-15T16:05:00Z \
   --context-only
 
 python3 validate_context.py \
   --context-file /tmp/sf102.json \
-  --require-weather-evidence
+  --require-weather-evidence \
+  --now-utc 2026-07-15T16:05:00Z
 
 ./run_tests.sh
 python3 -m pytest -q
@@ -177,19 +300,25 @@ python3 predict_jul11.py finalize \
   --fixture england-argentina \
   --elo-module elo_sf102.py \
   --elo-source-tsv evidence/World_20260715T1605Z.tsv \
+  --elo-receipt evidence/World_20260715T1605Z.receipt.json \
   --context-file /tmp/sf102.json \
   --artifact-out evidence/sf102_20260715T1605Z.final.json
 ```
 
 The July 11 QF commands below are retained for audit and replay only.
 
-Norway vs England example (replace the illustrative fetch timestamp with the
-actual response-download time):
+Norway vs England example (counterfactual direct-capture flow; a post-kickoff
+execution remains replay-only and cannot create an official artifact):
 
 ```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260711T1805Z.tsv \
+  --receipt-out evidence/World_20260711T1805Z.receipt.json \
+  --timeout-seconds 30
+
 python3 fetch_elo_current.py \
   --tsv evidence/World_20260711T1805Z.tsv \
-  --fetched-at-utc 2026-07-11T18:04:30Z \
+  --receipt evidence/World_20260711T1805Z.receipt.json \
   --out elo_qf99.py \
   --required-team Norway \
   --required-team England
@@ -205,12 +334,14 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/qf99.csv \
   --output-json /tmp/qf99.json \
   --require-weather-evidence \
+  --now-utc 2026-07-11T18:05:00Z \
   --context-only
 
 python3 predict_jul11.py finalize \
   --fixture norway-england \
   --elo-module elo_qf99.py \
   --elo-source-tsv evidence/World_20260711T1805Z.tsv \
+  --elo-receipt evidence/World_20260711T1805Z.receipt.json \
   --context-file /tmp/qf99.json \
   --artifact-out evidence/qf99_20260711T1805Z.final.json
 ```
@@ -218,9 +349,14 @@ python3 predict_jul11.py finalize \
 Argentina vs Switzerland uses the same flow in its own isolated run:
 
 ```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260711T2205Z.tsv \
+  --receipt-out evidence/World_20260711T2205Z.receipt.json \
+  --timeout-seconds 30
+
 python3 fetch_elo_current.py \
   --tsv evidence/World_20260711T2205Z.tsv \
-  --fetched-at-utc 2026-07-11T22:04:30Z \
+  --receipt evidence/World_20260711T2205Z.receipt.json \
   --out elo_qf100.py \
   --required-team Argentina \
   --required-team Switzerland
@@ -236,12 +372,14 @@ python3 run_context_pipeline.py \
   --input-csv /tmp/qf100.csv \
   --output-json /tmp/qf100.json \
   --require-weather-evidence \
+  --now-utc 2026-07-11T22:05:00Z \
   --context-only
 
 python3 predict_jul11.py finalize \
   --fixture argentina-switzerland \
   --elo-module elo_qf100.py \
   --elo-source-tsv evidence/World_20260711T2205Z.tsv \
+  --elo-receipt evidence/World_20260711T2205Z.receipt.json \
   --context-file /tmp/qf100.json \
   --artifact-out evidence/qf100_20260711T2205Z.final.json
 ```
@@ -250,9 +388,14 @@ The MC takes both artifacts and a separately refreshed Elo snapshot for future
 SF/final pairings only:
 
 ```bash
+python3 capture_elo_evidence.py \
+  --tsv-out evidence/World_20260711T2210Z.tsv \
+  --receipt-out evidence/World_20260711T2210Z.receipt.json \
+  --timeout-seconds 30
+
 python3 fetch_elo_current.py \
   --tsv evidence/World_20260711T2210Z.tsv \
-  --fetched-at-utc 2026-07-11T22:09:30Z \
+  --receipt evidence/World_20260711T2210Z.receipt.json \
   --out elo_mc.py \
   --required-team France \
   --required-team Spain \
@@ -266,6 +409,7 @@ python3 predict_jul11.py mc \
               evidence/qf100_20260711T2205Z.final.json \
   --elo-module elo_mc.py \
   --elo-source-tsv evidence/World_20260711T2210Z.tsv \
+  --elo-receipt evidence/World_20260711T2210Z.receipt.json \
   --qf98-winner Spain
 ```
 
@@ -273,6 +417,13 @@ Replace `Spain` with `Belgium` in both MC required-team validation and
 `--qf98-winner` when Belgium wins QF98.
 
 ## Artifact trust boundary
+
+The Elo receipt is a local, unsigned audit binding. It closes the accidental
+copy/re-stamp path by binding the response time, evidence basename, byte count,
+and body digest, but it cannot prove authenticity against an operator who can
+forge or copy the same-named TSV and receipt together. Stronger adversarial
+assurance requires a signed scheduler attestation or an externally retained
+append-only/WORM capture log.
 
 The artifact payload SHA-256 detects accidental edits, and the runner creates
 the local path once with read-only permissions. It is not a digital signature:
@@ -287,17 +438,31 @@ digest from the artifact being checked.
 An official run is valid only when all of the following are true:
 
 - `SOURCE` is exactly `https://www.eloratings.net/World.tsv`.
-- The Elo snapshot has a timezone-aware fetch time and a matching SHA-256 of
-  the retained raw response; required-team ratings also match a fresh parse of
-  that response.
+- The Elo evidence is a new create-only file containing the direct, unmodified
+  HTTP response body; its receipt records
+  `capture_method=direct_http_response_body`, the response-completion time,
+  byte count, and matching SHA-256. The operator must not supply a copied,
+  reconstructed, transcoded, newline-normalized, or reused TSV; the unsigned
+  receipt's non-adversarial enforcement boundary is documented above.
+- The receipt is no more than 30 minutes old at official finalization. The Elo
+  module matches the receipt and retained response, and required-team ratings
+  match a fresh parse of those bytes.
 - Every participating team is present and none is listed in `ESTIMATES`.
 - `indoor_no_weather` is used only with retained match-specific
   `official_roof` HTTP(S) evidence checked within six hours that explicitly
   confirms roof closure, records `roof_status=closed`, and matches the selected
   `weather_evidence_fixture_id`. A retractable-roof venue without that
   confirmation follows the outdoor path.
-- Outdoor matches have retained kickoff-hour weather evidence with a matching
-  SHA-256 and forecast-valid time.
+- Third-place/final schema-4 outdoor api.weather.gov evidence records
+  `weather_capture_method=direct_http_response_body|workspace_web_fetch`,
+  with exact case and underscores (no whitespace, case, or hyphen aliases),
+  retains matching SHA-256 values for both the points and hourly snapshots,
+  proves that the points response `id` (or `properties.@id`) equals the declared
+  points source, proves that `properties.forecastHourly` equals the hourly
+  source, and contains a real period covering kickoff. The hourly
+  `properties.updateTime` is the sole forecast issuance time; `generatedAt` is
+  recorded separately and cannot establish freshness. Workspace web-fetch
+  snapshots are auditable text, not retained raw HTTP response bytes.
 - Finalization happens before kickoff, evidence timestamps are not later than
   the run time, and the official output uses frozen `w=0.6` model / `0.4`
   market probabilities.
@@ -309,18 +474,22 @@ An official run is valid only when all of the following are true:
   and advancement. Any absolute gap at or above 4 points sets
   `review_required=true` and must be surfaced in the run report; it is an
   investigation flag, not permission to change frozen parameters.
-- Each new official artifact uses schema 2 / `pre_registered_match_prediction`,
-  records its stage, has a verified canonical payload SHA-256, and was generated
-  before its exact fixture kickoff. Artifact paths are create-only; the reader
-  remains compatible with the historical schema 1 QF artifacts.
+- QF/SF official artifacts use schema 3. Third-place/final artifacts use schema
+  4 / `pre_registered_match_prediction`. Both record
+  `provenance_contract=direct_http_v1`, the receipt identity, stage, and verified
+  canonical payload SHA-256, and must be generated before the exact fixture
+  kickoff. Artifact paths are create-only; the reader accepts schemas 1-4 but
+  rejects a schema/stage mismatch.
 - MC consumes the two stored official QF advancement probabilities without
   recalculating or republishing them. Fresh Elo is used only for future rounds,
   and the output states that live match state is not incorporated.
 - Before finalization, `./run_tests.sh` and `python3 -m pytest -q` both pass.
-- Injecting stale or estimated Elo, missing required teams or market inputs,
-  missing/invalid roof evidence, stale weather, future evidence timestamps, an
-  at-or-after-kickoff run time, or an existing artifact path exits non-zero and
-  produces no official probability output.
+- A failed capture, missing/invalid receipt, a receipt bound to another evidence
+  file, evidence/receipt/module mismatch, Elo older than 30 minutes, estimated
+  Elo, missing required teams or market inputs, missing/invalid roof evidence,
+  stale weather, future evidence
+  timestamps, an at-or-after-kickoff run time, or an existing artifact path
+  exits non-zero and produces no official probability output.
 
 Run acceptance from a newly started scheduled task. Testing in the interactive
 session that supplied the URL is not valid evidence that persistent provenance

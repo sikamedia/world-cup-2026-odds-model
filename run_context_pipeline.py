@@ -192,6 +192,18 @@ def main() -> None:
         help="Require complete matchday weather provenance on every row, including weather_scale=1.00.",
     )
     ap.add_argument(
+        "--require-structured-weather",
+        action="store_true",
+        help="Require the schema-4 capture method and structured NWS points/hourly chain.",
+    )
+    ap.add_argument(
+        "--now-utc",
+        help=(
+            "Validation run time as an ISO-8601 timestamp; forwarded only when "
+            "structured weather is required."
+        ),
+    )
+    ap.add_argument(
         "--context-only",
         action="store_true",
         help="Stop after import and validation; do not train, evaluate, or run a predictor.",
@@ -354,6 +366,13 @@ def main() -> None:
         validate_cmd.append("--fail-on-warning")
     if args.require_weather_evidence or args.fixture_source in FINALIZATION_SOURCES:
         validate_cmd.append("--require-weather-evidence")
+    structured_weather_required = (
+        args.require_structured_weather or args.fixture_source in FINALIZATION_SOURCES
+    )
+    if structured_weather_required:
+        validate_cmd.append("--require-structured-weather")
+    if structured_weather_required and args.now_utc:
+        validate_cmd.extend(["--now-utc", args.now_utc])
     _run_step("Validate context JSON", validate_cmd)
 
     if args.context_only or args.fixture_source in FINALIZATION_SOURCES:

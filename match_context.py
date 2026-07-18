@@ -41,6 +41,8 @@ WEATHER_DECISION_SCALES = {
     "indoor_no_weather": 1.0,
 }
 ROOF_STATUSES = {"closed", "open"}
+WEATHER_CAPTURE_METHODS = {"direct_http_response_body", "workspace_web_fetch"}
+NWS_API_HOST = "api.weather.gov"
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,11 @@ class MatchContext:
     market_advance_odds: tuple[float, float] | None = None
     roof_status: str | None = None
     weather_evidence_fixture_id: str | None = None
+    weather_capture_method: str | None = None
+    weather_points_source: str | None = None
+    weather_points_evidence_snapshot: str | None = None
+    weather_points_evidence_sha256: str | None = None
+    weather_forecast_generated_at_utc: str | None = None
 
 
 def context_key(home: str, away: str) -> str:
@@ -215,6 +222,15 @@ def _coerce_weather_evidence_type(raw: Any) -> str | None:
     return value
 
 
+def _coerce_weather_capture_method(raw: Any) -> str | None:
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str) or raw not in WEATHER_CAPTURE_METHODS:
+        allowed = ", ".join(sorted(WEATHER_CAPTURE_METHODS))
+        raise ValueError(f"weather_capture_method must be one of: {allowed}")
+    return raw
+
+
 def _coerce_roof_status(raw: Any) -> str | None:
     if raw is None or not str(raw).strip():
         return None
@@ -258,6 +274,58 @@ def _is_http_url(raw: str | None) -> bool:
     return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
 
 
+def _is_nws_api_url(raw: str | None, *, points: bool = False) -> bool:
+    if not raw:
+        return False
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() != "https" or parsed.hostname != NWS_API_HOST:
+        return False
+    return not points or parsed.path.startswith("/points/")
+
+
+def _validate_snapshot_digest(
+    snapshot: str | None,
+    digest: str | None,
+    *,
+    snapshot_field: str,
+    digest_field: str,
+) -> list[str]:
+    issues: list[str] = []
+    if not digest:
+        return issues
+    normalized_digest = digest.strip().lower()
+    if len(normalized_digest) != 64 or any(
+        ch not in "0123456789abcdef" for ch in normalized_digest
+    ):
+        issues.append(f"{digest_field} must be a 64-character hexadecimal SHA-256")
+    elif snapshot:
+        actual_digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
+        if normalized_digest != actual_digest:
+            issues.append(
+                f"{digest_field} does not match {snapshot_field} "
+                f"(expected {actual_digest})"
+            )
+    return issues
+
+
+def _load_json_snapshot(
+    snapshot: str | None,
+    field: str,
+    issues: list[str],
+) -> dict[str, Any] | None:
+    if not snapshot:
+        return None
+    try:
+        value = json.loads(snapshot)
+    except json.JSONDecodeError as exc:
+        issues.append(f"{field} must contain valid JSON: {exc.msg}")
+        return None
+    if not isinstance(value, dict):
+        issues.append(f"{field} must contain a JSON object")
+        return None
+    return value
+
+
 def weather_context_has_evidence(context: MatchContext) -> bool:
     """Return whether a row asserts any auditable weather input or decision."""
 
@@ -274,6 +342,11 @@ def weather_context_has_evidence(context: MatchContext) -> bool:
             context.weather_evidence_sha256,
             context.roof_status,
             context.weather_evidence_fixture_id,
+            context.weather_capture_method,
+            context.weather_points_source,
+            context.weather_points_evidence_snapshot,
+            context.weather_points_evidence_sha256,
+            context.weather_forecast_generated_at_utc,
         )
     )
 
@@ -285,6 +358,7 @@ def validate_weather_context(
     legacy_heat: str | None = None,
     now_utc: datetime | None = None,
     expected_fixture_id: str | None = None,
+    require_structured_weather: bool = False,
 ) -> list[str]:
     """Validate auditable matchday weather evidence.
 
@@ -330,22 +404,45 @@ def validate_weather_context(
         if not value:
             issues.append(f"weather evidence requires {field}")
 
+    structured_weather = require_structured_weather or any(
+        (
+            context.weather_capture_method,
+            context.weather_points_source,
+            context.weather_points_evidence_snapshot,
+            context.weather_points_evidence_sha256,
+            context.weather_forecast_generated_at_utc,
+        )
+    )
+    if structured_weather and not context.weather_capture_method:
+        issues.append("structured weather evidence requires weather_capture_method")
+    elif (
+        context.weather_capture_method is not None
+        and context.weather_capture_method not in WEATHER_CAPTURE_METHODS
+    ):
+        issues.append(
+            "weather_capture_method must be one of: "
+            + ", ".join(sorted(WEATHER_CAPTURE_METHODS))
+        )
+
     if context.weather_source and not _is_http_url(context.weather_source):
         issues.append("weather_source must be an http(s) URL")
 
-    snapshot = context.weather_evidence_snapshot
-    digest = context.weather_evidence_sha256
-    if digest:
-        normalized_digest = digest.strip().lower()
-        if len(normalized_digest) != 64 or any(ch not in "0123456789abcdef" for ch in normalized_digest):
-            issues.append("weather_evidence_sha256 must be a 64-character hexadecimal SHA-256")
-        elif snapshot:
-            actual_digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
-            if normalized_digest != actual_digest:
-                issues.append(
-                    "weather_evidence_sha256 does not match weather_evidence_snapshot "
-                    f"(expected {actual_digest})"
-                )
+    issues.extend(
+        _validate_snapshot_digest(
+            context.weather_evidence_snapshot,
+            context.weather_evidence_sha256,
+            snapshot_field="weather_evidence_snapshot",
+            digest_field="weather_evidence_sha256",
+        )
+    )
+    issues.extend(
+        _validate_snapshot_digest(
+            context.weather_points_evidence_snapshot,
+            context.weather_points_evidence_sha256,
+            snapshot_field="weather_points_evidence_snapshot",
+            digest_field="weather_points_evidence_sha256",
+        )
+    )
 
     timestamps: dict[str, datetime | None] = {}
     for field, raw in (
@@ -353,6 +450,7 @@ def validate_weather_context(
         ("weather_checked_at_utc", context.weather_checked_at_utc),
         ("weather_forecast_issued_at_utc", context.weather_forecast_issued_at_utc),
         ("weather_forecast_valid_at_utc", context.weather_forecast_valid_at_utc),
+        ("weather_forecast_generated_at_utc", context.weather_forecast_generated_at_utc),
     ):
         try:
             timestamps[field] = _parse_utc_timestamp(raw, field)
@@ -364,6 +462,7 @@ def validate_weather_context(
     checked = timestamps["weather_checked_at_utc"]
     issued = timestamps["weather_forecast_issued_at_utc"]
     valid = timestamps["weather_forecast_valid_at_utc"]
+    generated = timestamps["weather_forecast_generated_at_utc"]
 
     if now_utc is not None:
         if now_utc.tzinfo is None or now_utc.utcoffset() is None:
@@ -378,6 +477,7 @@ def validate_weather_context(
             for field, value in (
                 ("weather_checked_at_utc", checked),
                 ("weather_forecast_issued_at_utc", issued),
+                ("weather_forecast_generated_at_utc", generated),
             ):
                 if value is not None and value > now:
                     issues.append(
@@ -416,33 +516,247 @@ def validate_weather_context(
                 "weather_evidence_fixture_id does not match the selected fixture: "
                 f"expected {expected_fixture_id!r}, got {context.weather_evidence_fixture_id!r}"
             )
+        nws_points_fields = {
+            "weather_points_source": context.weather_points_source,
+            "weather_points_evidence_snapshot": context.weather_points_evidence_snapshot,
+            "weather_points_evidence_sha256": context.weather_points_evidence_sha256,
+        }
+        for field, value in nws_points_fields.items():
+            if value:
+                issues.append(f"official_roof evidence cannot include {field}")
     else:
         if not context.weather_forecast_issued_at_utc:
             issues.append("outdoor weather evidence requires weather_forecast_issued_at_utc")
         if not context.weather_forecast_valid_at_utc:
             issues.append("outdoor weather evidence requires weather_forecast_valid_at_utc")
-        if issued is not None and checked is not None:
+        if issued is not None and checked is not None and not structured_weather:
             if issued > checked:
-                issues.append("weather_forecast_issued_at_utc cannot be after weather_checked_at_utc")
+                issues.append(
+                    "weather_forecast_issued_at_utc cannot be after weather_checked_at_utc"
+                )
             elif (checked - issued).total_seconds() > 24.0 * 3600.0:
                 issue_age_hours = (checked - issued).total_seconds() / 3600.0
                 issues.append(
                     f"weather forecast issue is stale: issued {issue_age_hours:.1f}h "
                     "before it was checked (>24h)"
                 )
-        if kickoff is not None and valid is not None:
+        if kickoff is not None and valid is not None and not structured_weather:
             kickoff_hour = kickoff.replace(minute=0, second=0, microsecond=0)
             valid_hour = valid.replace(minute=0, second=0, microsecond=0)
             if valid_hour != kickoff_hour:
                 issues.append("weather_forecast_valid_at_utc must cover the kickoff hour")
 
-    if decision.startswith("heat_") and context.weather_evidence_type not in {"point_forecast", "hourly"}:
+        if structured_weather:
+            structured_required = {
+                "weather_points_source": context.weather_points_source,
+                "weather_points_evidence_snapshot": context.weather_points_evidence_snapshot,
+                "weather_points_evidence_sha256": context.weather_points_evidence_sha256,
+                "weather_forecast_generated_at_utc": context.weather_forecast_generated_at_utc,
+            }
+            for field, value in structured_required.items():
+                if not value:
+                    issues.append(f"structured outdoor weather evidence requires {field}")
+
+            if context.weather_evidence_type != "hourly":
+                issues.append(
+                    "structured outdoor weather evidence requires "
+                    "weather_evidence_type=hourly"
+                )
+            if context.weather_points_source and not _is_nws_api_url(
+                context.weather_points_source,
+                points=True,
+            ):
+                issues.append(
+                    "weather_points_source must be an https://api.weather.gov/points/ URL"
+                )
+            if context.weather_source and not _is_nws_api_url(context.weather_source):
+                issues.append("weather_source must be an https://api.weather.gov URL")
+
+            points_json = _load_json_snapshot(
+                context.weather_points_evidence_snapshot,
+                "weather_points_evidence_snapshot",
+                issues,
+            )
+            hourly_json = _load_json_snapshot(
+                context.weather_evidence_snapshot,
+                "weather_evidence_snapshot",
+                issues,
+            )
+
+            if points_json is not None:
+                properties = points_json.get("properties")
+                top_level_id = points_json.get("id")
+                properties_id = (
+                    properties.get("@id") if isinstance(properties, dict) else None
+                )
+                has_top_level_id = "id" in points_json
+                has_properties_id = (
+                    isinstance(properties, dict) and "@id" in properties
+                )
+                if not has_top_level_id and not has_properties_id:
+                    issues.append(
+                        "weather points JSON requires id or properties.@id"
+                    )
+                if has_top_level_id:
+                    if not isinstance(top_level_id, str) or not top_level_id:
+                        issues.append(
+                            "weather points JSON id must be a non-empty string"
+                        )
+                    elif top_level_id != context.weather_points_source:
+                        issues.append(
+                            "weather_points_source must exactly match weather points JSON id"
+                        )
+                if has_properties_id:
+                    if not isinstance(properties_id, str) or not properties_id:
+                        issues.append(
+                            "weather points JSON properties.@id must be a non-empty string"
+                        )
+                    elif has_top_level_id and isinstance(top_level_id, str):
+                        if properties_id != top_level_id:
+                            issues.append(
+                                "weather points JSON id and properties.@id must match"
+                            )
+                    elif properties_id != context.weather_points_source:
+                        issues.append(
+                            "weather_points_source must exactly match weather points JSON "
+                            "properties.@id"
+                        )
+                forecast_hourly = (
+                    properties.get("forecastHourly") if isinstance(properties, dict) else None
+                )
+                if not isinstance(forecast_hourly, str) or not forecast_hourly:
+                    issues.append(
+                        "weather points JSON requires properties.forecastHourly"
+                    )
+                elif forecast_hourly != context.weather_source:
+                    issues.append(
+                        "weather_source must exactly match points properties.forecastHourly"
+                    )
+
+            if hourly_json is not None:
+                properties = hourly_json.get("properties")
+                if not isinstance(properties, dict):
+                    issues.append("weather hourly JSON requires a properties object")
+                    properties = {}
+
+                derived_issued = None
+                derived_generated = None
+                for json_field, context_field in (
+                    ("updateTime", "weather_forecast_issued_at_utc"),
+                    ("generatedAt", "weather_forecast_generated_at_utc"),
+                ):
+                    raw_value = properties.get(json_field)
+                    if not isinstance(raw_value, str) or not raw_value:
+                        issues.append(f"weather hourly JSON requires properties.{json_field}")
+                        continue
+                    try:
+                        parsed_value = _parse_utc_timestamp(
+                            raw_value,
+                            f"weather hourly properties.{json_field}",
+                        )
+                    except ValueError as exc:
+                        issues.append(str(exc))
+                        continue
+                    if json_field == "updateTime":
+                        derived_issued = parsed_value
+                        external_value = issued
+                    else:
+                        derived_generated = parsed_value
+                        external_value = generated
+                    if external_value is not None and external_value != parsed_value:
+                        issues.append(
+                            f"{context_field} must match weather hourly properties.{json_field}"
+                        )
+
+                if (
+                    derived_issued is not None
+                    and derived_generated is not None
+                    and derived_issued > derived_generated
+                ):
+                    issues.append(
+                        "weather hourly properties.updateTime cannot be after "
+                        "properties.generatedAt"
+                    )
+                if generated is not None and checked is not None and generated > checked:
+                    issues.append(
+                        "weather_forecast_generated_at_utc cannot be after weather_checked_at_utc"
+                    )
+                if derived_issued is not None and checked is not None:
+                    if derived_issued > checked:
+                        issues.append(
+                            "weather hourly properties.updateTime cannot be after "
+                            "weather_checked_at_utc"
+                        )
+                    elif (checked - derived_issued).total_seconds() > 24.0 * 3600.0:
+                        issue_age_hours = (
+                            checked - derived_issued
+                        ).total_seconds() / 3600.0
+                        issues.append(
+                            f"weather forecast issue is stale: issued {issue_age_hours:.1f}h "
+                            "before it was checked (>24h)"
+                        )
+
+                periods = properties.get("periods")
+                if not isinstance(periods, list) or not periods:
+                    issues.append("weather hourly JSON requires non-empty properties.periods")
+                elif kickoff is not None:
+                    covering_periods: list[datetime] = []
+                    for index, period in enumerate(periods):
+                        if not isinstance(period, dict):
+                            issues.append(f"weather hourly period {index} must be an object")
+                            continue
+                        start_raw = period.get("startTime")
+                        end_raw = period.get("endTime")
+                        if not isinstance(start_raw, str) or not isinstance(end_raw, str):
+                            issues.append(
+                                f"weather hourly period {index} requires startTime and endTime"
+                            )
+                            continue
+                        try:
+                            start = _parse_utc_timestamp(
+                                start_raw,
+                                f"weather hourly period {index} startTime",
+                            )
+                            end = _parse_utc_timestamp(
+                                end_raw,
+                                f"weather hourly period {index} endTime",
+                            )
+                        except ValueError as exc:
+                            issues.append(str(exc))
+                            continue
+                        if start is None or end is None or start >= end:
+                            issues.append(
+                                f"weather hourly period {index} must have startTime before endTime"
+                            )
+                            continue
+                        if start <= kickoff < end:
+                            covering_periods.append(start)
+                    if len(covering_periods) != 1:
+                        issues.append(
+                            "weather hourly JSON must contain exactly one period covering kickoff"
+                        )
+                    elif valid is not None and valid != covering_periods[0]:
+                        issues.append(
+                            "weather_forecast_valid_at_utc must match the kickoff period startTime"
+                        )
+
+    if decision.startswith("heat_") and context.weather_evidence_type not in {
+        "point_forecast",
+        "hourly",
+    }:
         issues.append(f"{decision} requires weather_evidence_type=point_forecast or hourly")
-    if decision == "none" and context.weather_evidence_type not in {"point_forecast", "hourly"}:
+    if decision == "none" and context.weather_evidence_type not in {
+        "point_forecast",
+        "hourly",
+    }:
         issues.append("weather_decision=none requires weather_evidence_type=point_forecast or hourly")
     if decision == "rain_applied" and context.weather_evidence_type not in {"hourly", "radar"}:
         issues.append("rain_applied requires weather_evidence_type=hourly or radar")
-    if decision == "rain_watch" and context.weather_evidence_type not in {"point_forecast", "hourly", "radar"}:
+    if decision == "rain_watch" and context.weather_evidence_type not in {
+        "point_forecast",
+        "hourly",
+        "radar",
+    }:
         issues.append("rain_watch requires weather_evidence_type=point_forecast, hourly, or radar")
 
     return issues
@@ -481,6 +795,19 @@ def _coerce_context(payload: Any) -> MatchContext:
         roof_status=_coerce_roof_status(payload.get("roof_status")),
         weather_evidence_fixture_id=_coerce_optional_text(
             payload.get("weather_evidence_fixture_id")
+        ),
+        weather_capture_method=_coerce_weather_capture_method(
+            payload.get("weather_capture_method")
+        ),
+        weather_points_source=_coerce_optional_text(payload.get("weather_points_source")),
+        weather_points_evidence_snapshot=_coerce_optional_snapshot(
+            payload.get("weather_points_evidence_snapshot")
+        ),
+        weather_points_evidence_sha256=_coerce_optional_text(
+            payload.get("weather_points_evidence_sha256")
+        ),
+        weather_forecast_generated_at_utc=_coerce_optional_text(
+            payload.get("weather_forecast_generated_at_utc")
         ),
     )
 

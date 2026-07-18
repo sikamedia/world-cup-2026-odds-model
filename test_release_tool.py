@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -44,6 +45,53 @@ def _fake_bundle_bytes(root: Path) -> bytes:
             info.external_attr = 0o100644 << 16
             archive.writestr(info, (root / source_name).read_bytes())
     return output.getvalue()
+
+
+def _write_evidence_fixture(
+    root: Path,
+    *,
+    basis: str = "live_current_elo",
+    evidence_ref: str = "evidence/sf102.freeze.json",
+) -> tuple[Path, Path]:
+    skill_dir = root / "skill"
+    evidence_dir = root / "evidence"
+    skill_dir.mkdir(parents=True)
+    evidence_dir.mkdir()
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "fixture"\nversion = "0.4.0rc1"\n',
+        encoding="utf-8",
+    )
+    (skill_dir / "SKILL.md").write_text("# Fixture\n", encoding="utf-8")
+    (root / "ensemble_ledger.csv").write_text(
+        "basis,pre_match_evidence\n" f"{basis},{evidence_ref}\n",
+        encoding="utf-8",
+    )
+    (evidence_dir / "World.tsv").write_bytes(b"raw response")
+    (evidence_dir / "World.receipt.json").write_text("{}\n", encoding="ascii")
+    (evidence_dir / "sf102.freeze.json").write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "elo_provenance": {
+                        "retained_tsv_name": "World.tsv",
+                        "retained_receipt_name": "World.receipt.json",
+                    }
+                },
+                "payload_sha256": "synthetic",
+            }
+        ),
+        encoding="ascii",
+    )
+    return skill_dir, evidence_dir
+
+
+def _collect_evidence_files(root: Path) -> tuple[Path, ...]:
+    original_repo = build_skill.REPO
+    try:
+        build_skill.REPO = root
+        return build_skill._ensemble_evidence_files()
+    finally:
+        build_skill.REPO = original_repo
 
 
 class FixtureRepo:
@@ -157,6 +205,60 @@ class BundleReproducibilityTests(unittest.TestCase):
                 build_skill.REPO = original_repo
                 build_skill.SKILL_DIR = original_skill_dir
                 build_skill.ROOT_PY = original_root_py
+
+    def test_real_builder_carries_ledger_bound_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary = Path(temporary_dir)
+            root = temporary / "source"
+            skill_dir, _evidence_dir = _write_evidence_fixture(root)
+
+            original_repo = build_skill.REPO
+            original_skill_dir = build_skill.SKILL_DIR
+            original_root_py = build_skill.ROOT_PY
+            try:
+                build_skill.REPO = root
+                build_skill.SKILL_DIR = skill_dir
+                build_skill.ROOT_PY = ["pyproject.toml", "ensemble_ledger.csv"]
+                bundle = temporary / "fixture.skill"
+                build_skill.build(stage=temporary / "stage", out=bundle)
+                with zipfile.ZipFile(bundle) as archive:
+                    names = set(archive.namelist())
+                self.assertIn(
+                    "football-odds-model/evidence/sf102.freeze.json", names
+                )
+                self.assertIn("football-odds-model/evidence/World.tsv", names)
+                self.assertIn(
+                    "football-odds-model/evidence/World.receipt.json", names
+                )
+            finally:
+                build_skill.REPO = original_repo
+                build_skill.SKILL_DIR = original_skill_dir
+                build_skill.ROOT_PY = original_root_py
+
+    def test_evidence_manifest_rejects_non_live_and_symlink_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir) / "non-live"
+            _write_evidence_fixture(root, basis="mixed_legacy")
+            with self.assertRaisesRegex(SystemExit, "only valid for basis"):
+                _collect_evidence_files(root)
+
+            root = Path(temporary_dir) / "symlink"
+            _skill_dir, evidence_dir = _write_evidence_fixture(root)
+            target = Path(temporary_dir) / "outside.tsv"
+            target.write_bytes(b"outside")
+            (evidence_dir / "World.tsv").unlink()
+            (evidence_dir / "World.tsv").symlink_to(target)
+            with self.assertRaisesRegex(SystemExit, "cannot use symlinks"):
+                _collect_evidence_files(root)
+
+    def test_evidence_manifest_requires_tracked_release_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir) / "source"
+            _write_evidence_fixture(root)
+            _git(root, "init", "-q")
+            _git(root, "add", "pyproject.toml", "ensemble_ledger.csv", "skill/SKILL.md")
+            with self.assertRaisesRegex(SystemExit, "must be git-tracked"):
+                _collect_evidence_files(root)
 
 
 class ReleaseManagerTests(unittest.TestCase):

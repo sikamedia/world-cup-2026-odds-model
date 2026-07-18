@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Parse a saved eloratings.net World.tsv into a prediction-side ELO_CURRENT dict.
+"""Parse retained World.tsv bytes into a prediction-side ELO_CURRENT dict.
 
-NO NETWORK CODE ON PURPOSE - fetching happens outside this script. Save the
-response and record its actual download time, then run:
+Network capture happens in ``capture_elo_evidence.py``. For current runs, pass
+its receipt so the response time and raw-byte binding cannot be caller-stamped:
 
     python3 fetch_elo_current.py --tsv world_YYYY-MM-DD.tsv \
-        --fetched-at-utc 2026-07-10T11:00:00Z \
+        --receipt world_YYYY-MM-DD.receipt.json \
         --out elo_current_YYYYMMDD.py
 
 TSV format (observed 2026-07-04): tab-separated, one team per line;
@@ -23,9 +23,12 @@ import tempfile
 
 from elo_snapshot import (
     CODE_TO_TEAM,
+    EloCaptureReceipt,
     EloSnapshotError,
     OFFICIAL_ELO_SOURCE,
-    parse_world_tsv,
+    UNVERIFIED_REPLAY_METHOD,
+    load_elo_capture_receipt,
+    parse_world_tsv_bytes,
 )
 
 
@@ -48,9 +51,10 @@ def _fetched_at_utc(raw: str | None) -> _dt.datetime:
 def emit_module(
     elo: dict[str, int],
     out_path: str | Path,
-    tsv_path: str | Path,
     *,
+    source_bytes: bytes,
     fetched_at_utc: _dt.datetime,
+    capture_receipt: EloCaptureReceipt | None,
 ) -> None:
     fetched_at = fetched_at_utc
     if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
@@ -58,7 +62,15 @@ def emit_module(
     fetched_at = fetched_at.astimezone(_dt.timezone.utc)
     fetched_text = fetched_at.isoformat(timespec="seconds").replace("+00:00", "Z")
     today = fetched_at.date().isoformat()
-    source_sha256 = hashlib.sha256(Path(tsv_path).read_bytes()).hexdigest()
+    if not isinstance(source_bytes, bytes):
+        raise ValueError("source_bytes must be bytes")
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    receipt_sha256 = capture_receipt.receipt_sha256 if capture_receipt is not None else None
+    capture_method = (
+        capture_receipt.capture_method
+        if capture_receipt is not None
+        else UNVERIFIED_REPLAY_METHOD
+    )
     lines = [
         '#!/usr/bin/env python3',
         f'"""PREDICTION-SIDE Elo snapshot - parsed {today} from World.tsv.',
@@ -77,6 +89,9 @@ def emit_module(
         f'FETCHED_AT_UTC = "{fetched_text}"',
         f'SOURCE = "{OFFICIAL_ELO_SOURCE}"',
         f'SOURCE_SHA256 = "{source_sha256}"',
+        f"SOURCE_RECEIPT_SHA256 = {receipt_sha256!r}",
+        f'CAPTURE_METHOD = "{capture_method}"',
+        f"SOURCE_BYTE_COUNT = {len(source_bytes)}",
         'ESTIMATES = []',
         '',
         '# Legacy date-only fields retained for older prediction scripts.',
@@ -115,13 +130,37 @@ if __name__ == "__main__":
         help="team that must be present; repeat for every scheduled fixture team",
     )
     ap.add_argument(
+        "--receipt",
+        help="direct HTTP capture receipt from capture_elo_evidence.py",
+    )
+    ap.add_argument(
         "--fetched-at-utc",
-        required=True,
-        help="actual World.tsv download time as timezone-aware ISO-8601",
+        help="legacy replay timestamp; requires --allow-unverified-replay",
+    )
+    ap.add_argument(
+        "--allow-unverified-replay",
+        action="store_true",
+        help="allow a non-official historical/replay module without a capture receipt",
     )
     a = ap.parse_args()
+    if a.receipt and a.fetched_at_utc:
+        ap.error("--receipt and --fetched-at-utc are mutually exclusive")
+    if a.receipt and a.allow_unverified_replay:
+        ap.error("--allow-unverified-replay cannot be used with --receipt")
+    if not a.receipt and not a.allow_unverified_replay:
+        ap.error(
+            "--receipt is required; historical replay must explicitly pass "
+            "--allow-unverified-replay with --fetched-at-utc"
+        )
+    if a.allow_unverified_replay and not a.fetched_at_utc:
+        ap.error("--allow-unverified-replay requires --fetched-at-utc")
+    source_path = Path(a.tsv)
     try:
-        elo = parse_world_tsv(a.tsv)
+        source_bytes = source_path.read_bytes()
+    except OSError as exc:
+        ap.error(f"cannot read World.tsv {source_path}: {exc}")
+    try:
+        elo = parse_world_tsv_bytes(source_bytes, source_path)
     except EloSnapshotError as exc:
         ap.error(str(exc))
     if len(elo) < 16:
@@ -129,8 +168,26 @@ if __name__ == "__main__":
     missing = list(dict.fromkeys(team for team in a.required_team if team not in elo))
     if missing:
         raise SystemExit(f"required team(s) missing from World.tsv: {', '.join(missing)}")
-    try:
-        fetched_at = _fetched_at_utc(a.fetched_at_utc)
-    except ValueError as exc:
-        ap.error(str(exc))
-    emit_module(elo, a.out, a.tsv, fetched_at_utc=fetched_at)
+    receipt = None
+    if a.receipt:
+        try:
+            receipt = load_elo_capture_receipt(
+                a.receipt,
+                source_tsv=source_path,
+                source_bytes=source_bytes,
+            )
+        except EloSnapshotError as exc:
+            ap.error(str(exc))
+        fetched_at = receipt.response_completed_at_utc
+    else:
+        try:
+            fetched_at = _fetched_at_utc(a.fetched_at_utc)
+        except ValueError as exc:
+            ap.error(str(exc))
+    emit_module(
+        elo,
+        a.out,
+        source_bytes=source_bytes,
+        fetched_at_utc=fetched_at,
+        capture_receipt=receipt,
+    )

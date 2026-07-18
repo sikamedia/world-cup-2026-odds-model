@@ -48,6 +48,21 @@ REVIEW_GATE_N = 28
 SHADOW_DRAW_BOOST = 0.07
 
 
+def _ensemble_grid_lines(ensemble):
+    """Format every pre-registered grid point without changing production w."""
+    lines = []
+    for point in ensemble.grid:
+        marker = (
+            " [FROZEN PRODUCTION]"
+            if point.model_weight == ensemble.current_weight
+            else ""
+        )
+        lines.append(
+            f"      w={point.model_weight:.1f} Brier {point.brier:.4f}{marker}"
+        )
+    return tuple(lines)
+
+
 def res(hg, ag):
     return 0 if hg > ag else (1 if hg == ag else 2)
 
@@ -196,15 +211,22 @@ def build_draw_floor_metric_rows(games=KO_RESULTS):
     return rows
 
 
-def structured_governance_summaries(root=Path(ROOT)):
-    """Load the small append-only ledgers used by the review output and tests."""
+def structured_governance_summaries(
+    root=Path(ROOT),
+    *,
+    trusted_anchor_resolver=None,
+):
+    """Load review ledgers, default-denying externally unanchored freezes."""
     style = evaluate_style_cohort(
         load_style_observations(root / "style_divergence_ledger.csv"))
     shootout = summarize_shootouts(
         load_shootout_ledger(root / "shootout_ledger.csv"))
     home = summarize_home_advantage(
         load_home_advantage_ledger(root / "home_advantage_ledger.csv"))
-    ensemble = summarize_ensemble_basis(root / "ensemble_ledger.csv")
+    ensemble = summarize_ensemble_basis(
+        root / "ensemble_ledger.csv",
+        trusted_anchor_resolver=trusted_anchor_resolver,
+    )
     return style, shootout, home, ensemble
 
 
@@ -321,9 +343,9 @@ def main():
     print(f"  {'k':>5}{'Brier':>9}{'logLoss':>9}{'expUps':>9}   (actual ups {act_ups})")
     briers = {}
     for k in ks:
-        b, l, e = adv_metrics(records, k)
+        b, log_loss, e = adv_metrics(records, k)
         briers[k] = b
-        print(f"  {k:>5.2f}{b:>9.4f}{l:>9.4f}{e:>9.2f}")
+        print(f"  {k:>5.2f}{b:>9.4f}{log_loss:>9.4f}{e:>9.2f}")
     best_k = min(briers, key=briers.get)
     e70 = adv_metrics(records, 0.70)[2]
 
@@ -359,6 +381,9 @@ def main():
         print(f"    current w={ensemble.current_weight:.1f} Brier "
               f"{ensemble.current_brier:.4f} vs best w={ensemble.best_weight:.1f} "
               f"Brier {ensemble.best_brier:.4f}")
+        print("    diagnostic model-weight grid (review only; production remains frozen):")
+        for line in _ensemble_grid_lines(ensemble):
+            print(line)
     print("\nEducational/analytical use only; not betting advice.")
 
 

@@ -1,0 +1,51 @@
+{
+  "schema_version": 3,
+  "artifact_type": "pre_registered_match_prediction_incident",
+  "provenance_contract": "direct_http_v1",
+  "run_id": "sf101_france_spain_final",
+  "fixture": "france-spain",
+  "stage": "SF1",
+  "venue": "AT&T Stadium, Dallas (retractable roof)",
+  "kickoff_utc": "2026-07-14T19:00:00Z",
+  "scheduled_run_utc": "2026-07-14T16:05:00Z",
+  "run_started_utc": "2026-07-14T16:05:51Z",
+  "run_environment": "cowork-sandbox (isolated Linux shell, egress via allowlisted proxy)",
+  "status": "FAIL_CLOSED_NO_OFFICIAL_PROBABILITY",
+  "fail_closed_condition": "elo_capture_failed",
+  "official_probability_published": false,
+  "pre_kickoff_guard": {
+    "checked_at_utc": "2026-07-14T16:05:51Z",
+    "kickoff_utc": "2026-07-14T19:00:00Z",
+    "result": "PASS (guard satisfied - run was well before kickoff; failure below is unrelated to timing)"
+  },
+  "elo_capture_attempts": [
+    {
+      "attempt": 1,
+      "at_utc": "2026-07-14T16:06:28Z",
+      "command": "python3 capture_elo_evidence.py --tsv-out evidence/World_20260714T1606Z.tsv --receipt-out evidence/World_20260714T1606Z.receipt.json --timeout-seconds 30",
+      "exit_code": 2,
+      "error": "urlopen error Tunnel connection failed: 403 Forbidden",
+      "proxy_header": "X-Proxy-Error: blocked-by-allowlist",
+      "files_created": []
+    },
+    {
+      "attempt": 2,
+      "at_utc": "2026-07-14T16:07:51Z",
+      "command": "python3 capture_elo_evidence.py --tsv-out evidence/World_20260714T1609Z_retry.tsv --receipt-out evidence/World_20260714T1609Z_retry.receipt.json --timeout-seconds 30",
+      "exit_code": 2,
+      "error": "urlopen error Tunnel connection failed: 403 Forbidden",
+      "proxy_header": "X-Proxy-Error: blocked-by-allowlist",
+      "files_created": []
+    }
+  ],
+  "diagnosis": "This isolated run's shell sandbox reaches the internet through an allowlisted egress proxy. https://www.eloratings.net is not on that allowlist (confirmed non-transient across two attempts ~90s apart; a control request to https://example.com was also proxy-blocked with the same header, indicating a restrictive default allowlist rather than a site-specific outage). capture_elo_evidence.py therefore could not perform its mandated direct_http_response_body capture (urlopen against OFFICIAL_ELO_SOURCE with HTTP 200 + exact final-URL check). No TSV or receipt file was created by either attempt (the script's own cleanup path correctly removed nothing, since creation never began).",
+  "explicitly_not_done": [
+    "Did NOT fetch World.tsv content via any alternate tool (e.g. general-purpose web fetch) and write it into an evidence file, because that would fabricate a capture_method=direct_http_response_body receipt for bytes that were not actually captured by the sanctioned direct-HTTP path. This is precisely the forgery risk AUTOMATION_RUNBOOK.md's 'Artifact trust boundary' section warns about.",
+    "Did NOT proceed to context template / market / weather evidence / predict_jul11.py finalize steps, since the fail-closed contract requires stopping the entire official prediction path on Elo capture failure, not just skipping the Elo module.",
+    "Did NOT substitute estimated Elo ratings or the previously known values (Spain 2190 / Argentina 2177 / France 2163 / England 2097 from prior sessions' evidence) as a stand-in for a fresh capture.",
+    "Did NOT create or overwrite any evidence/sf101_*.final.json artifact."
+  ],
+  "recommended_action": "Retry this capture from an environment with network access to www.eloratings.net (e.g. the user's local machine, or a session where that domain is allowlisted) before 2026-07-14T19:00:00Z kickoff. Roughly 2h50m of runway remained at the time of this report (16:10 UTC). If no successful capture occurs before kickoff, sf101 has no official artifact and must be recorded as a missed finalization, consistent with the July 11 incident precedent in AUTOMATION_RUNBOOK.md.",
+  "educational_analytical_use_only": true,
+  "no_betting_advice": true
+}

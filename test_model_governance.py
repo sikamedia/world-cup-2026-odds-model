@@ -5,12 +5,17 @@ from __future__ import annotations
 
 import csv
 from dataclasses import replace
+from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import backtest_ko as bt
 from model_governance import (
     FloorMetricRow,
+    TrustedTimingAnchor,
+    _summarize_ensemble_probabilities,
     evaluate_style_cohort,
     latest_style_observations,
     load_home_advantage_ledger,
@@ -27,6 +32,10 @@ from model_governance import (
 
 
 ROOT = Path(__file__).resolve().parent
+FREEZE_MODEL_HOME = 0.40907600365775676
+FREEZE_DRAW_RESOLUTION_HOME = 0.4773726359693714
+FREEZE_MARKET_HOME = 0.55
+FREEZE_ENSEMBLE_HOME = 0.6 * FREEZE_MODEL_HOME + 0.4 * FREEZE_MARKET_HOME
 
 
 def _approx(actual: float, expected: float, tolerance: float = 1e-12) -> None:
@@ -43,9 +52,10 @@ def _raises_value_error(callable_) -> None:
 
 def _write_ensemble(path: Path, rows: list[dict[str, str]]) -> None:
     fieldnames = [
-        "date", "stage", "home", "away", "fav_side", "p_model_currelo",
-        "p_market", "p_ensemble", "advanced_fav", "brier_model",
-        "brier_market", "brier_ensemble", "basis", "notes",
+        "date", "stage", "home", "away", "reference_side", "fav_side",
+        "p_model_currelo", "p_market", "p_ensemble", "advanced_reference",
+        "advanced_fav", "brier_model", "brier_market", "brier_ensemble",
+        "basis", "notes", "pre_match_evidence",
     ]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -55,21 +65,199 @@ def _write_ensemble(path: Path, rows: list[dict[str, str]]) -> None:
 
 def _ensemble_row(index: int, *, basis: str = "live_current_elo") -> dict[str, str]:
     return {
-        "date": f"2026-08-{index + 1:02d}",
+        "date": f"2026-07-{index + 1:02d}",
         "stage": "TEST",
         "home": f"Home {index}",
         "away": f"Away {index}",
-        "fav_side": "H",
+        "reference_side": "H",
         "p_model_currelo": "0.800",
         "p_market": "0.600",
         "p_ensemble": "0.700",
-        "advanced_fav": "1",
+        "advanced_reference": "1",
         "brier_model": "0.040",
         "brier_market": "0.160",
         "brier_ensemble": "0.090",
         "basis": basis,
         "notes": "synthetic governance boundary",
     }
+
+
+def _world_tsv() -> bytes:
+    codes = [
+        ("ES", 2190), ("AR", 2177), ("FR", 2163), ("EN", 2097),
+        ("BR", 2050), ("PT", 2040), ("CO", 2003), ("NL", 1995),
+        ("MX", 1980), ("CH", 1949), ("NO", 1972), ("BE", 1961),
+        ("DE", 1950), ("JP", 1930), ("MA", 1921), ("HR", 1910),
+    ]
+    return "".join(
+        f"{rank}\t{rank}\t{code}\t{rating}\n"
+        for rank, (code, rating) in enumerate(codes, start=1)
+    ).encode("ascii")
+
+
+def _seal(payload: dict[str, object]) -> dict[str, object]:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    return {
+        "payload": payload,
+        "payload_sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def _trusted_anchor_resolver(
+    evidence: Path,
+    *,
+    digest: str | None = None,
+    observed_at_utc: datetime | None = None,
+):
+    envelope = json.loads(evidence.read_text(encoding="ascii"))
+    anchor = TrustedTimingAnchor(
+        source="scheduler_log",
+        anchor_id="sf102-finalization-run",
+        payload_sha256=digest or envelope["payload_sha256"],
+        observed_at_utc=observed_at_utc
+        or datetime(2026, 7, 15, 16, 11, tzinfo=timezone.utc),
+    )
+
+    def resolve(source: str, anchor_id: str) -> TrustedTimingAnchor:
+        if (source, anchor_id) != (anchor.source, anchor.anchor_id):
+            raise LookupError("unknown timing anchor")
+        return anchor
+
+    return resolve
+
+
+def _write_ensemble_freeze(directory: Path) -> Path:
+    evidence_directory = directory / "evidence"
+    evidence_directory.mkdir(exist_ok=True)
+    tsv = evidence_directory / "elo_sf102_World.tsv"
+    receipt = evidence_directory / "elo_sf102_receipt.json"
+    evidence = evidence_directory / "sf102.freeze.json"
+    raw = _world_tsv()
+    tsv.write_bytes(raw)
+    receipt_payload = {
+        "artifact_type": "elo_http_capture_receipt",
+        "body_byte_count": len(raw),
+        "body_sha256": hashlib.sha256(raw).hexdigest(),
+        "capture_method": "direct_http_response_body",
+        "evidence_file": tsv.name,
+        "final_url": "https://www.eloratings.net/World.tsv",
+        "http_status": 200,
+        "requested_url": "https://www.eloratings.net/World.tsv",
+        "response_completed_at_utc": "2026-07-15T16:00:00Z",
+        "schema_version": 1,
+    }
+    receipt.write_text(
+        json.dumps(receipt_payload, indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    receipt_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+    payload = {
+        "schema_version": 1,
+        "artifact_type": "ensemble_pre_match_freeze",
+        "fixture": {
+            "slug": "england-argentina",
+            "fixture_id": "2026-SF102-England-Argentina",
+            "stage": "semifinal",
+            "home": "England",
+            "away": "Argentina",
+            "kickoff_at_utc": "2026-07-15T19:00:00Z",
+        },
+        "frozen_at_utc": "2026-07-15T16:10:00Z",
+        "live_match_state_incorporated": False,
+        "timing_anchor": {
+            "source": "scheduler_log",
+            "anchor_id": "sf102-finalization-run",
+        },
+        "reference_side": "H",
+        "probabilities": {
+            "model": FREEZE_MODEL_HOME,
+            "market": FREEZE_MARKET_HOME,
+            "ensemble": FREEZE_ENSEMBLE_HOME,
+        },
+        "model_basis": {
+            "engine": "predict_jul11._predict/v1",
+            "profile": "knockout",
+            "parameters": {
+                "avg_goals": 2.7,
+                "gd_per_100": 0.65,
+                "draw_boost": 0.06,
+                "ko_regress": 0.7,
+                "ko_regress_max": 1.0,
+                "ko_elo_scale": 350.0,
+                "pen_tilt": 0.2,
+                "lambda_floor": 0.3,
+                "style_threshold": 266.0,
+            },
+        },
+        "market_evidence": {
+            "source": "https://example.com/sf102-advance",
+            "captured_at_utc": "2026-07-15T16:09:00Z",
+            "odds": [1.0 / 0.55, 1.0 / 0.45],
+            "demargin_method": "proportional",
+            "advance_method": "direct_two_way",
+        },
+        "context_basis": {
+            "weather": {"decision": "indoor_no_weather", "scale": 1.0},
+            "lineup": {"home_scale": 1.0, "away_scale": 1.0},
+        },
+        "elo_provenance": {
+            "provenance_contract": "direct_http_v1",
+            "source": "https://www.eloratings.net/World.tsv",
+            "capture_method": "direct_http_response_body",
+            "fetched_at_utc": "2026-07-15T16:00:00Z",
+            "source_sha256": hashlib.sha256(raw).hexdigest(),
+            "receipt_sha256": receipt_sha256,
+            "body_byte_count": len(raw),
+            "retained_tsv_name": tsv.name,
+            "retained_receipt_name": receipt.name,
+            "ratings": {"England": 2097, "Argentina": 2177},
+            "estimates": [],
+        },
+    }
+    evidence.write_text(
+        json.dumps(_seal(payload), indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    return evidence
+
+
+def _write_official_ensemble_artifact(directory: Path, freeze_path: Path) -> Path:
+    freeze = json.loads(freeze_path.read_text(encoding="ascii"))["payload"]
+    payload = {
+        "schema_version": 3,
+        "artifact_type": "pre_registered_match_prediction",
+        "fixture": {
+            "slug": "england-argentina",
+            "fixture_id": "2026-SF102-England-Argentina",
+            "stage": "semifinal",
+            "home": "England",
+            "away": "Argentina",
+            "kickoff_at_utc": "2026-07-15T19:00:00Z",
+        },
+        "generated_at_utc": "2026-07-15T16:10:00Z",
+        "live_match_state_incorporated": False,
+        "model": {"advance_home": FREEZE_MODEL_HOME},
+        "market": {"advance_home": FREEZE_MARKET_HOME},
+        "official": {
+            "model_weight": 0.6,
+            "market_weight": 0.4,
+            "advance_home": FREEZE_ENSEMBLE_HOME,
+            "wdl_90": {"home": 0.3, "draw": 0.3, "away": 0.4},
+        },
+        "elo_provenance": freeze["elo_provenance"],
+    }
+    artifact = directory / "evidence" / "sf102.final.json"
+    artifact.write_text(
+        json.dumps(_seal(payload), indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    return artifact
 
 
 def main() -> None:
@@ -374,24 +562,40 @@ def main() -> None:
     assert ensemble.basis_counts["current_elo_counterfactual"] == 1
     assert ensemble.total_rows == ensemble.live_rows + 2
     assert ensemble.minimum_for_refit == 12
-    assert ensemble.decision == "HOLD_W_0_6"
     assert ensemble.current_weight == 0.6
     assert ensemble.current_brier is not None
-    assert ensemble.best_weight is None
-    assert ensemble.grid == ()
+    if ensemble.live_rows >= ensemble.minimum_for_refit:
+        assert ensemble.decision == "REVIEW_REFIT"
+        assert len(ensemble.grid) == 11
+        assert ensemble.best_weight is not None
+        assert ensemble.best_brier is not None
+    else:
+        assert ensemble.decision == "HOLD_W_0_6"
+        assert ensemble.best_weight is None
+        assert ensemble.best_brier is None
+        assert ensemble.grid == ()
 
     with TemporaryDirectory() as temp_dir:
         ledger = Path(temp_dir) / "ensemble.csv"
-        rows = [_ensemble_row(index) for index in range(12)]
-        rows.append(_ensemble_row(12, basis="mixed_legacy"))
-        _write_ensemble(ledger, rows[:11])
-        eleven = summarize_ensemble_basis(ledger)
+        admitted_rows = [(0.8, 0.6, 1.0)] * 12
+        eleven = _summarize_ensemble_probabilities(
+            admitted_rows[:11],
+            total_rows=11,
+            basis_counts={"live_current_elo": 11},
+            minimum_for_refit=12,
+            current_weight=0.6,
+        )
         assert eleven.live_rows == 11
         assert eleven.grid == ()
         assert eleven.decision == "HOLD_W_0_6"
 
-        _write_ensemble(ledger, rows)
-        twelve = summarize_ensemble_basis(ledger)
+        twelve = _summarize_ensemble_probabilities(
+            admitted_rows,
+            total_rows=13,
+            basis_counts={"live_current_elo": 12, "mixed_legacy": 1},
+            minimum_for_refit=12,
+            current_weight=0.6,
+        )
         assert twelve.live_rows == 12
         assert twelve.excluded_rows == 1
         assert len(twelve.grid) == 11
@@ -399,16 +603,379 @@ def main() -> None:
         _approx(twelve.best_brier, 0.04)
         assert twelve.current_brier > twelve.best_brier
         assert twelve.decision == "REVIEW_REFIT"
+        grid_lines = bt._ensemble_grid_lines(twelve)
+        assert len(grid_lines) == 11
+        assert [line.split()[0] for line in grid_lines] == [
+            f"w={index / 10:.1f}" for index in range(11)
+        ]
+        assert sum("[FROZEN PRODUCTION]" in line for line in grid_lines) == 1
+        assert "w=0.6" in next(
+            line for line in grid_lines if "[FROZEN PRODUCTION]" in line
+        )
 
-        duplicate_row = dict(rows[0])
+        grandfathered = _ensemble_row(0)
+        grandfathered.update(
+            {
+                "date": "2026-07-05",
+                "stage": "R16",
+                "home": "Brazil",
+                "away": "Norway",
+            }
+        )
+        legacy = dict(grandfathered)
+        legacy["fav_side"] = legacy.pop("reference_side")
+        legacy["advanced_fav"] = legacy.pop("advanced_reference")
+        _write_ensemble(ledger, [legacy])
+        assert summarize_ensemble_basis(ledger).live_rows == 1
+
+        conflicting_side = dict(grandfathered)
+        conflicting_side["fav_side"] = "A"
+        _write_ensemble(ledger, [conflicting_side])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        conflicting_outcome = dict(grandfathered)
+        conflicting_outcome["advanced_fav"] = "0"
+        _write_ensemble(ledger, [conflicting_outcome])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        duplicate_row = dict(grandfathered)
         duplicate_row["date"] = "2026-09-01"
-        duplicate = [*rows[:12], duplicate_row]
+        duplicate = [grandfathered, duplicate_row]
         _write_ensemble(ledger, duplicate)
         _raises_value_error(lambda: summarize_ensemble_basis(ledger))
-        pending = [dict(row) for row in rows[:12]]
-        pending[-1]["advanced_fav"] = "pending"
-        _write_ensemble(ledger, pending)
+        pending = dict(grandfathered)
+        pending["advanced_reference"] = "pending"
+        _write_ensemble(ledger, [pending])
         _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        freeze_path = _write_ensemble_freeze(Path(temp_dir))
+        governed = _ensemble_row(0)
+        governed.update(
+            {
+                "date": "2026-07-15",
+                "stage": "SF",
+                "home": "England",
+                "away": "Argentina",
+                "p_model_currelo": "0.409",
+                "p_market": "0.550",
+                "p_ensemble": "0.465",
+                "advanced_reference": "1",
+                "brier_model": "0.3493",
+                "brier_market": "0.2025",
+                "brier_ensemble": "0.2862",
+                "pre_match_evidence": freeze_path.relative_to(
+                    Path(temp_dir)
+                ).as_posix(),
+            }
+        )
+        _write_ensemble(ledger, [governed])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+        assert summarize_ensemble_basis(
+            ledger,
+            trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+        ).live_rows == 1
+
+        home_freeze_envelope = json.loads(freeze_path.read_text(encoding="ascii"))
+        home_freeze_payload = home_freeze_envelope["payload"]
+        away_freeze_payload = json.loads(json.dumps(home_freeze_payload))
+        away_freeze_payload["reference_side"] = "A"
+        away_model = 1.0 - FREEZE_MODEL_HOME
+        away_market = 1.0 - FREEZE_MARKET_HOME
+        away_ensemble = 1.0 - FREEZE_ENSEMBLE_HOME
+        away_freeze_payload["probabilities"] = {
+            "model": away_model,
+            "market": away_market,
+            "ensemble": away_ensemble,
+        }
+        freeze_path.write_text(
+            json.dumps(_seal(away_freeze_payload), indent=2, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
+        away_governed = dict(governed)
+        away_governed.update(
+            {
+                "reference_side": "A",
+                "p_model_currelo": f"{away_model:.12f}",
+                "p_market": f"{away_market:.12f}",
+                "p_ensemble": f"{away_ensemble:.12f}",
+                "brier_model": f"{(1.0 - away_model) ** 2:.12f}",
+                "brier_market": f"{(1.0 - away_market) ** 2:.12f}",
+                "brier_ensemble": f"{(1.0 - away_ensemble) ** 2:.12f}",
+            }
+        )
+        _write_ensemble(ledger, [away_governed])
+        assert summarize_ensemble_basis(
+            ledger,
+            trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+        ).live_rows == 1
+        freeze_path.write_text(
+            json.dumps(_seal(home_freeze_payload), indent=2, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
+        _write_ensemble(ledger, [governed])
+
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(
+                    freeze_path, digest="0" * 64
+                ),
+            )
+        )
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(
+                    freeze_path,
+                    observed_at_utc=datetime(
+                        2026, 7, 15, 16, 9, tzinfo=timezone.utc
+                    ),
+                ),
+            )
+        )
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(
+                    freeze_path,
+                    observed_at_utc=datetime(
+                        2026, 7, 15, 19, 0, tzinfo=timezone.utc
+                    ),
+                ),
+            )
+        )
+
+        stage_alias = dict(governed)
+        stage_alias["stage"] = "semifinal"
+        _write_ensemble(ledger, [governed, stage_alias])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+            )
+        )
+
+        official_artifact = _write_official_ensemble_artifact(
+            Path(temp_dir), freeze_path
+        )
+        official_governed = dict(governed)
+        official_governed["pre_match_evidence"] = official_artifact.relative_to(
+            Path(temp_dir)
+        ).as_posix()
+        _write_ensemble(ledger, [official_governed])
+        assert summarize_ensemble_basis(ledger).live_rows == 1
+
+        official_envelope = json.loads(
+            official_artifact.read_text(encoding="ascii")
+        )
+        inconsistent_payload = dict(official_envelope["payload"])
+        inconsistent_payload["official"] = dict(inconsistent_payload["official"])
+        inconsistent_payload["official"]["advance_home"] = 0.9
+        inconsistent_artifact = (
+            Path(temp_dir) / "evidence" / "sf102.inconsistent.json"
+        )
+        inconsistent_artifact.write_text(
+            json.dumps(_seal(inconsistent_payload), indent=2, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
+        inconsistent_row = dict(governed)
+        inconsistent_row.update(
+            {
+                "p_ensemble": "0.900",
+                "brier_ensemble": "0.010",
+                "pre_match_evidence": inconsistent_artifact.relative_to(
+                    Path(temp_dir)
+                ).as_posix(),
+            }
+        )
+        _write_ensemble(ledger, [inconsistent_row])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        mismatched_probability = dict(governed)
+        mismatched_probability["p_model_currelo"] = "0.500"
+        _write_ensemble(ledger, [mismatched_probability])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+            )
+        )
+
+        freeze_envelope = json.loads(freeze_path.read_text(encoding="ascii"))
+        original_freeze_payload = dict(freeze_envelope["payload"])
+
+        def write_freeze(payload: dict[str, object]) -> None:
+            freeze_path.write_text(
+                json.dumps(_seal(payload), indent=2, sort_keys=True) + "\n",
+                encoding="ascii",
+            )
+
+        def governed_for_probabilities(
+            model: float,
+            market: float,
+            ensemble_probability: float,
+        ) -> dict[str, str]:
+            row = dict(governed)
+            row.update(
+                {
+                    "p_model_currelo": f"{model:.12f}",
+                    "p_market": f"{market:.12f}",
+                    "p_ensemble": f"{ensemble_probability:.12f}",
+                    "brier_model": f"{(1.0 - model) ** 2:.12f}",
+                    "brier_market": f"{(1.0 - market) ** 2:.12f}",
+                    "brier_ensemble": f"{(1.0 - ensemble_probability) ** 2:.12f}",
+                }
+            )
+            return row
+
+        def assert_freeze_rejected(
+            payload: dict[str, object],
+            row: dict[str, str] | None = None,
+        ) -> None:
+            write_freeze(payload)
+            _write_ensemble(ledger, [row or governed])
+            _raises_value_error(
+                lambda: summarize_ensemble_basis(
+                    ledger,
+                    trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+                )
+            )
+
+        model_probability_tamper = json.loads(json.dumps(original_freeze_payload))
+        model_probability_tamper["probabilities"]["model"] += 0.0001
+        model_probability_tamper["probabilities"]["ensemble"] = (
+            0.6 * model_probability_tamper["probabilities"]["model"]
+            + 0.4 * model_probability_tamper["probabilities"]["market"]
+        )
+        assert_freeze_rejected(
+            model_probability_tamper,
+            governed_for_probabilities(
+                model_probability_tamper["probabilities"]["model"],
+                model_probability_tamper["probabilities"]["market"],
+                model_probability_tamper["probabilities"]["ensemble"],
+            ),
+        )
+
+        model_parameter_tamper = json.loads(json.dumps(original_freeze_payload))
+        model_parameter_tamper["model_basis"]["parameters"]["avg_goals"] = 2.8
+        assert_freeze_rejected(model_parameter_tamper)
+
+        context_scalar_tamper = json.loads(json.dumps(original_freeze_payload))
+        context_scalar_tamper["context_basis"]["lineup"]["home_scale"] = 1.1
+        assert_freeze_rejected(context_scalar_tamper)
+
+        ignored_context_tamper = json.loads(json.dumps(original_freeze_payload))
+        ignored_context_tamper["context_basis"]["fatigue"] = {"home_scale": 0.95}
+        assert_freeze_rejected(ignored_context_tamper)
+
+        derived_from_90 = json.loads(json.dumps(original_freeze_payload))
+        derived_market_home = (
+            6.0 / 13.0
+            + (4.0 / 13.0) * FREEZE_DRAW_RESOLUTION_HOME
+        )
+        derived_ensemble_home = (
+            0.6 * FREEZE_MODEL_HOME + 0.4 * derived_market_home
+        )
+        derived_from_90["market_evidence"].update(
+            {
+                "odds": [2.0, 3.0, 4.0],
+                "advance_method": "derived_from_90",
+                "draw_resolution_home": FREEZE_DRAW_RESOLUTION_HOME,
+            }
+        )
+        derived_from_90["probabilities"]["market"] = derived_market_home
+        derived_from_90["probabilities"]["ensemble"] = derived_ensemble_home
+        write_freeze(derived_from_90)
+        derived_row = governed_for_probabilities(
+            FREEZE_MODEL_HOME,
+            derived_market_home,
+            derived_ensemble_home,
+        )
+        _write_ensemble(ledger, [derived_row])
+        assert summarize_ensemble_basis(
+            ledger,
+            trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+        ).live_rows == 1
+
+        wrong_draw_resolution = json.loads(json.dumps(derived_from_90))
+        wrong_draw_resolution["market_evidence"]["draw_resolution_home"] += 0.01
+        assert_freeze_rejected(wrong_draw_resolution, derived_row)
+
+        write_freeze(original_freeze_payload)
+        linked_evidence = Path(temp_dir) / "evidence" / "linked"
+        linked_evidence.symlink_to(Path(temp_dir) / "evidence", target_is_directory=True)
+        symlinked_row = dict(governed)
+        symlinked_row["pre_match_evidence"] = "evidence/linked/sf102.freeze.json"
+        _write_ensemble(ledger, [symlinked_row])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+            )
+        )
+
+        stale_freeze_payload = dict(original_freeze_payload)
+        stale_freeze_payload["frozen_at_utc"] = "2026-07-15T16:31:00Z"
+        write_freeze(stale_freeze_payload)
+        _write_ensemble(ledger, [governed])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(
+                    freeze_path,
+                    observed_at_utc=datetime(
+                        2026, 7, 15, 16, 32, tzinfo=timezone.utc
+                    ),
+                ),
+            )
+        )
+        write_freeze(original_freeze_payload)
+
+        wrong_kickoff_payload = dict(original_freeze_payload)
+        wrong_kickoff_payload["fixture"] = dict(wrong_kickoff_payload["fixture"])
+        wrong_kickoff_payload["fixture"]["kickoff_at_utc"] = (
+            "2026-07-15T23:59:00Z"
+        )
+        write_freeze(wrong_kickoff_payload)
+        _write_ensemble(ledger, [governed])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+            )
+        )
+        write_freeze(original_freeze_payload)
+
+        missing_evidence = dict(governed)
+        missing_evidence["pre_match_evidence"] = ""
+        _write_ensemble(ledger, [missing_evidence])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        backdated_missing_evidence = dict(missing_evidence)
+        backdated_missing_evidence["date"] = "2026-07-14"
+        _write_ensemble(ledger, [backdated_missing_evidence])
+        _raises_value_error(lambda: summarize_ensemble_basis(ledger))
+
+        backdated_evidence = dict(governed)
+        backdated_evidence["date"] = "2026-07-14"
+        _write_ensemble(ledger, [backdated_evidence])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+            )
+        )
+
+        freeze_payload = dict(original_freeze_payload)
+        freeze_payload["frozen_at_utc"] = "2026-07-15T19:00:00Z"
+        write_freeze(freeze_payload)
+        _write_ensemble(ledger, [governed])
+        _raises_value_error(
+            lambda: summarize_ensemble_basis(
+                ledger,
+                trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
+            )
+        )
 
     print("MODEL_GOVERNANCE_REGRESSION PASS")
 

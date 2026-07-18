@@ -109,10 +109,31 @@ def main() -> None:
         external_ratings_csv = tmp / "external_ratings.csv"
         elo_module = tmp / "elo_current_latest.py"
         elo_source_tsv = tmp / "World.tsv"
+        elo_receipt = tmp / "World.receipt.json"
         settled_csv = tmp / "settled.csv"
         results_csv = tmp / "results.csv"
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        elo_source_tsv.write_text(_world_tsv(), encoding="utf-8")
+        elo_source_bytes = _world_tsv().encode("utf-8")
+        elo_source_tsv.write_bytes(elo_source_bytes)
+        elo_receipt.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "artifact_type": "elo_http_capture_receipt",
+                    "capture_method": "direct_http_response_body",
+                    "requested_url": "https://www.eloratings.net/World.tsv",
+                    "final_url": "https://www.eloratings.net/World.tsv",
+                    "http_status": 200,
+                    "response_completed_at_utc": now.isoformat(),
+                    "evidence_file": elo_source_tsv.name,
+                    "body_byte_count": len(elo_source_bytes),
+                    "body_sha256": hashlib.sha256(elo_source_bytes).hexdigest(),
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="ascii",
+        )
         _run(
             [
                 sys.executable,
@@ -121,8 +142,8 @@ def main() -> None:
                 str(elo_source_tsv),
                 "--out",
                 str(elo_module),
-                "--fetched-at-utc",
-                now.isoformat(),
+                "--receipt",
+                str(elo_receipt),
             ]
         )
 
@@ -177,6 +198,8 @@ def main() -> None:
                 str(elo_module),
                 "--elo-source-tsv",
                 str(elo_source_tsv),
+                "--elo-receipt",
+                str(elo_receipt),
                 "--max-odds-age-minutes",
                 "60",
             ]
@@ -220,6 +243,8 @@ def main() -> None:
                 str(elo_module),
                 "--elo-source-tsv",
                 str(elo_source_tsv),
+                "--elo-receipt",
+                str(elo_receipt),
                 "--max-odds-age-minutes",
                 "60",
                 "--external-ratings-csv",

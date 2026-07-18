@@ -62,6 +62,11 @@ def _base_payload(
         "weather_evidence_fixture_id": None,
         "weather_evidence_snapshot": None,
         "weather_evidence_sha256": None,
+        "weather_capture_method": None,
+        "weather_points_source": None,
+        "weather_points_evidence_snapshot": None,
+        "weather_points_evidence_sha256": None,
+        "weather_forecast_generated_at_utc": None,
         "weather_decision": "none",
         "market_confidence": 1.0,
         "competition_state": competition_state,
@@ -114,6 +119,17 @@ def _csv_rows(matches: dict[str, dict]) -> list[dict[str, object]]:
                 "weather_evidence_fixture_id": payload.get("weather_evidence_fixture_id") or "",
                 "weather_evidence_snapshot": payload.get("weather_evidence_snapshot") or "",
                 "weather_evidence_sha256": payload.get("weather_evidence_sha256") or "",
+                "weather_capture_method": payload.get("weather_capture_method") or "",
+                "weather_points_source": payload.get("weather_points_source") or "",
+                "weather_points_evidence_snapshot": (
+                    payload.get("weather_points_evidence_snapshot") or ""
+                ),
+                "weather_points_evidence_sha256": (
+                    payload.get("weather_points_evidence_sha256") or ""
+                ),
+                "weather_forecast_generated_at_utc": (
+                    payload.get("weather_forecast_generated_at_utc") or ""
+                ),
                 "weather_decision": payload.get("weather_decision", "none"),
                 "market_confidence": payload.get("market_confidence", 1.0),
                 "competition_state": (
@@ -153,6 +169,11 @@ def _write_csv(matches: dict[str, dict], handle) -> None:
         "weather_evidence_fixture_id",
         "weather_evidence_snapshot",
         "weather_evidence_sha256",
+        "weather_capture_method",
+        "weather_points_source",
+        "weather_points_evidence_snapshot",
+        "weather_points_evidence_sha256",
+        "weather_forecast_generated_at_utc",
         "weather_decision",
         "market_confidence",
         "competition_state",
