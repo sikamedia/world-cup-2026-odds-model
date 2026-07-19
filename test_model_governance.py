@@ -20,7 +20,9 @@ from model_governance import (
     latest_style_observations,
     load_home_advantage_ledger,
     load_shootout_ledger,
+    load_stakes_goals_ledger,
     load_style_observations,
+    summarize_stakes_goals,
     paired_brier_comparison,
     style_observation_eligible,
     summarize_draw_floor_interaction,
@@ -980,6 +982,49 @@ def main() -> None:
                 trusted_anchor_resolver=_trusted_anchor_resolver(freeze_path),
             )
         )
+
+    # Stakes / friendly-like goal cohort: record-only, gated MONITOR_ONLY until
+    # the flagged (non-competitive) cohort reaches the pre-registered n=12.
+    stakes_rows = load_stakes_goals_ledger(ROOT / "stakes_goals_ledger.csv")
+    stakes_summary = summarize_stakes_goals(stakes_rows)
+    assert stakes_summary.minimum_for_review == 12
+    assert stakes_summary.flagged_rows < stakes_summary.minimum_for_review
+    assert not stakes_summary.gate_reached
+    assert stakes_summary.decision == "MONITOR_ONLY"
+    assert {cohort.label for cohort in stakes_summary.cohorts} == {
+        "competitive", "one_sided", "dead_rubber"
+    }
+    # The third-place playoff (rotated XI, 10 goals) is a dead rubber, never
+    # competitive — the classifier is ex-ante and stage-driven for the KO stage.
+    third_place = [row for row in stakes_rows if row.stage == "3P"]
+    assert third_place and all(
+        row.stakes_label == "dead_rubber" for row in third_place
+    )
+    # The gate fires REVIEW only once the flagged cohort reaches the minimum.
+    dead_template = next(
+        row for row in stakes_rows if row.stakes_label == "dead_rubber"
+    )
+    padded = list(stakes_rows) + [
+        replace(dead_template, home=f"Pad{index}", away=f"Foe{index}")
+        for index in range(12)
+    ]
+    assert summarize_stakes_goals(padded).decision == "REVIEW"
+    # Fail-fast on an unknown label or internally inconsistent goal fields.
+    stakes_header = (
+        "date,stage,home,away,stakes_label,delta_elo,"
+        "total_goals,over_2_5,margin,basis,notes"
+    )
+    with TemporaryDirectory() as temp_dir:
+        bad_stakes = Path(temp_dir) / "stakes.csv"
+        for bad_line in (
+            ",group,A,B,beach_game,0,4,1,0,x,",   # unknown stakes_label
+            ",group,A,B,dead_rubber,0,4,0,0,x,",  # over_2_5 disagrees with total
+            ",group,A,B,dead_rubber,0,3,1,2,x,",  # margin parity impossible
+        ):
+            bad_stakes.write_text(
+                f"{stakes_header}\n{bad_line}\n", encoding="utf-8"
+            )
+            _raises_value_error(lambda: load_stakes_goals_ledger(bad_stakes))
 
     print("MODEL_GOVERNANCE_REGRESSION PASS")
 

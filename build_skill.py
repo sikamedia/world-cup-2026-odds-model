@@ -74,6 +74,7 @@ ROOT_PY = [
     "run_tests.sh",
     "run_context_pipeline.py",
     "shootout_ledger.csv",
+    "stakes_goals_ledger.csv",
     "style_divergence_ledger.csv",
     "team_aliases.py",
     "test_competition_state_context.py",
@@ -298,8 +299,17 @@ def build(stage: Path = STAGE, out: Path = SKILL_FILE) -> None:
 
 
 if __name__ == "__main__":
-    import sys
-    out = SKILL_FILE
-    if len(sys.argv) > 1:
-        out = REPO / sys.argv[1]
-    build(out=out)
+    import argparse
+
+    # argparse (not raw argv[1]) so `build_skill.py --help` prints help instead
+    # of writing a 700KB file literally named "--help".
+    parser = argparse.ArgumentParser(
+        description="Build the installable football-odds-model.skill bundle.",
+    )
+    parser.add_argument(
+        "output",
+        nargs="?",
+        help="output .skill path (default: football-odds-model.skill)",
+    )
+    args = parser.parse_args()
+    build(out=REPO / args.output if args.output else SKILL_FILE)

@@ -85,11 +85,18 @@ description: >-
 >   current-Elo 50:50 ensemble 0.1834. The CSV `p_ensemble` column contains one
 >   `mixed_legacy` row from the stale-Elo/current-Elo transition. A refit must
 >   use only unique, settled `live_current_elo` rows and waits for eligible
->   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. At current
->   n=30 the ledger has 11 eligible rows out of 14 total (SF102 fail-closed as
->   `post_policy_no_freeze` — no compliant pre-match freeze): **HOLD_W_0_6**; a
->   compliant third-place or final artifact takes eligible n to the 12-row grid
->   threshold. The two July 11
+>   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. UPDATE
+>   (post-3P, KO n=31): the third-place artifact (France-England, schema-4
+>   `4ac75a42`) took the ledger to **12 eligible rows out of 15 total** (SF102
+>   still fail-closed as `post_policy_no_freeze` — no compliant pre-match
+>   freeze). The gate is reached, so `summarize_ensemble_basis` now returns
+>   **REVIEW_REFIT** and computes the grid (raw best w=1.0). This is
+>   **REVIEW-ONLY: w stays frozen at 0.6** pending the refit decision — do NOT
+>   move w off 0.6 on this alone. A single-tournament, monotone grid pointing to
+>   pure model (w=1.0) is not sufficient to move w: a paired-Brier gap this
+>   small over just 12 rows is within noise, and w=1.0 would contradict
+>   Discipline A (the market prices information the model cannot see). Refit
+>   only on a wider, cross-tournament sample. The two July 11
 >   QF preview rows remain eligible because `basis` records pre-match Elo input
 >   quality, not the existence of an official finalization artifact.
 >   The 11 live fixtures through France-Spain are explicitly grandfathered;

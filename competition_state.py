@@ -179,6 +179,60 @@ def lineup_scale(side: SideCompetitionState) -> float:
     return ROTATION_SCALE.get(side.rotation_risk, 1.0)
 
 
+# --- friendly-like / dead-rubber classifier -------------------------------
+# Ex-ante ONLY: derived from pre-kickoff competition state, never from the
+# result. Goals are measured AGAINST this flag in the stakes-goals ledger; they
+# never set it. See stakes_profile().
+STAKES_PROFILES = {"competitive", "one_sided", "dead_rubber"}
+_STAKE_LEVEL = {
+    "mustwin": "full", "normal": "full",
+    "top_spot": "low", "advance": "low", "seed_only": "low",
+    "dead_rubber": "none",
+}
+_LEVEL_ORDER = ("none", "low", "full")
+_THIRD_PLACE_STAGES = {"3P", "3RD", "THIRD", "THIRD_PLACE", "BRONZE"}
+
+
+def side_stakes(side: SideCompetitionState) -> str:
+    """How hard a side is trying, ex-ante: 'full' | 'low' | 'none'.
+
+    `eliminated` → none; a qualified side playing only for seeding is `low`;
+    `rotation_risk == "high"` drops one level (resting starters)."""
+    if side.mathematical_state == "eliminated":
+        return "none"
+    level = _STAKE_LEVEL.get(side.stake_state, "full")
+    if level != "none" and side.rotation_risk == "high":
+        level = _LEVEL_ORDER[_LEVEL_ORDER.index(level) - 1]
+    return level
+
+
+def stakes_profile(
+    state: MatchCompetitionState | Mapping[str, Any] | str | None,
+    stage: str | None = None,
+) -> str:
+    """Classify a match's competitive intensity, ex-ante:
+    'competitive' | 'one_sided' | 'dead_rubber'.
+
+    A game is only friendly-like when NEITHER side is fighting. The third-place
+    playoff (stage '3P') is a dead rubber by construction. `one_sided` is the
+    asymmetric case (one side coasting, one trying) — a different mechanism from
+    the beach-game dead rubber, recorded separately. Unknown state defaults to
+    'competitive' (assume full stakes rather than mislabel a real game friendly).
+    NEVER inspects the score."""
+    if stage is not None and str(stage).strip().upper() in _THIRD_PLACE_STAGES:
+        return "dead_rubber"
+    match_state = coerce_match_state(state)
+    if match_state is None:
+        return "competitive"
+    home = side_stakes(match_state.home)
+    away = side_stakes(match_state.away)
+    if home == "full" and away == "full":
+        return "competitive"
+    if home != "full" and away != "full":
+        return "dead_rubber"
+    return "one_sided"
+
+
 def match_adjustments(state: MatchCompetitionState | Mapping[str, Any] | str | None) -> dict[str, Any]:
     match_state = coerce_match_state(state)
     if match_state is None:

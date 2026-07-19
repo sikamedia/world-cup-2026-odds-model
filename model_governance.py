@@ -725,6 +725,135 @@ def summarize_shootouts(
     )
 
 
+# --- stakes / friendly-like goal cohort (record-only) ---------------------
+# Does a "friendly-like" (dead-rubber / rotation) game score differently? The
+# stakes label is ex-ante (competition_state.stakes_profile); goals are measured
+# AGAINST it here and never set it. MONITOR_ONLY until enough flagged games
+# accumulate — this module never fits a parameter.
+_STAKES_COHORT_ORDER = ("competitive", "one_sided", "dead_rubber")
+
+
+@dataclass(frozen=True)
+class StakesGoalsRecord:
+    date: str
+    stage: str
+    home: str
+    away: str
+    stakes_label: str
+    delta_elo: float
+    total_goals: int
+    over_2_5: int
+    margin: int
+    basis: str
+    notes: str
+
+
+@dataclass(frozen=True)
+class StakesCohort:
+    label: str
+    n: int
+    mean_goals: float
+    var_goals: float
+    over_2_5_rate: float
+
+
+@dataclass(frozen=True)
+class StakesGoalsSummary:
+    rows: int
+    cohorts: tuple[StakesCohort, ...]
+    flagged_rows: int
+    minimum_for_review: int
+    gate_reached: bool
+    decision: str
+
+
+def load_stakes_goals_ledger(path: str | Path) -> list[StakesGoalsRecord]:
+    """Read the stakes/goals ledger, failing fast on an unknown stakes label or
+    a row whose goal fields are internally inconsistent (over_2_5 and margin must
+    agree with total_goals). The label is ex-ante; the score never sets it."""
+    from competition_state import STAKES_PROFILES
+
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+        raw_rows = list(csv.DictReader(handle))
+    records: list[StakesGoalsRecord] = []
+    seen: set[tuple[str, str, str]] = set()
+    for line, row in enumerate(raw_rows, 2):
+        home = row["home"].strip()
+        away = row["away"].strip()
+        stage = row["stage"].strip()
+        key = (stage, home, away)
+        if not home or not away or key in seen:
+            raise ValueError(f"stakes ledger line {line}: duplicate/empty fixture")
+        seen.add(key)
+        label = row["stakes_label"].strip()
+        if label not in STAKES_PROFILES:
+            raise ValueError(
+                f"stakes ledger line {line}: unknown stakes_label {label!r}"
+            )
+        total_goals = int(row["total_goals"])
+        margin = int(row["margin"])
+        over_2_5 = int(row["over_2_5"])
+        if total_goals < 0 or margin < 0 or margin > total_goals:
+            raise ValueError(f"stakes ledger line {line}: bad goals/margin")
+        if (total_goals - margin) % 2 != 0:
+            raise ValueError(
+                f"stakes ledger line {line}: margin parity inconsistent with total"
+            )
+        if over_2_5 not in (0, 1) or over_2_5 != int(total_goals >= 3):
+            raise ValueError(
+                f"stakes ledger line {line}: over_2_5 disagrees with total_goals"
+            )
+        records.append(
+            StakesGoalsRecord(
+                date=row["date"].strip(),
+                stage=stage,
+                home=home,
+                away=away,
+                stakes_label=label,
+                delta_elo=float(row["delta_elo"]),
+                total_goals=total_goals,
+                over_2_5=over_2_5,
+                margin=margin,
+                basis=row.get("basis", "").strip(),
+                notes=row.get("notes", "").strip(),
+            )
+        )
+    return records
+
+
+def summarize_stakes_goals(
+    records: Sequence[StakesGoalsRecord],
+    *,
+    minimum_for_review: int = 12,
+) -> StakesGoalsSummary:
+    """Per-cohort goal mean / variance / over-2.5 rate, gated MONITOR_ONLY until
+    the flagged (non-competitive) cohort reaches minimum_for_review. RECORD-ONLY:
+    raw cohort means are confounded by stage and ΔElo at low n; this only flags
+    when there is enough to look, and never fits a parameter."""
+    cohorts: list[StakesCohort] = []
+    for label in _STAKES_COHORT_ORDER:
+        goals = [r.total_goals for r in records if r.stakes_label == label]
+        n = len(goals)
+        over = sum(1 for r in records if r.stakes_label == label and r.over_2_5)
+        if n:
+            mean = sum(goals) / n
+            var = sum((g - mean) ** 2 for g in goals) / n
+            over_rate = over / n
+        else:
+            mean = var = over_rate = 0.0
+        cohorts.append(StakesCohort(label, n, mean, var, over_rate))
+    flagged = sum(c.n for c in cohorts if c.label != "competitive")
+    gate = flagged >= minimum_for_review
+    return StakesGoalsSummary(
+        rows=len(records),
+        cohorts=tuple(cohorts),
+        flagged_rows=flagged,
+        minimum_for_review=minimum_for_review,
+        gate_reached=gate,
+        decision="REVIEW" if gate else "MONITOR_ONLY",
+    )
+
+
 @dataclass(frozen=True)
 class HomeAdvantageRecord:
     date: str
