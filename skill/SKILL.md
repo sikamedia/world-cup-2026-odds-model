@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.9 bundle (KO n=30, semifinals complete; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen; 3P/Final schema-4 fixtures registered)
+# Football Odds Model — v3.9 bundle (KO n=31, third-place complete; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen; Final schema-4 fixture registered)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -53,10 +53,10 @@ description: >-
 >   **0.1733** vs flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all
 >   round — all 3 favourite exits were pens-after-draw (Ger +230, Ned +110,
 >   Aus +92), while every ΔElo≥232 favourite advanced in 90'. Live monitoring
->   through 2026-07-15 (KO n=30, semifinals complete): called 24/30, advancement
->   Brier **0.1602**, 90' RPS **0.1484**; reality LESS upset-heavy than the
->   regressed model (actual 90' upsets 6 vs 10.47 expected at k=0.70). Flat 1.00
->   is retrospectively best on n=30 (Brier 0.1555), but remains MONITOR-ONLY,
+>   through the third-place match (KO n=31): called 24/31, advancement Brier
+>   **0.1646**, 90' RPS **0.1544**; reality LESS upset-heavy than the regressed
+>   model (actual 90' upsets 7 vs 10.93 expected at k=0.70). Flat 1.00 is
+>   retrospectively best on n=31 (Brier 0.1605), but remains MONITOR-ONLY,
 >   not a refit.
 >   It spends the whole buffer (Argentina +495 was still dragged to 1-1 at
 >   90'). Auto-graded when `--elo` is given (prints k_eff); explicit
@@ -78,7 +78,7 @@ description: >-
 >   adv/RPS channels' small preference for 0.15 was survivor bias (Argentina
 >   advanced anyway; cost on adv Brier ~0.005). Group profile keeps 0.15
 >   (frozen). floor-0.15 remains a prospective SHADOW after the n=24 baseline;
->   only later floor-active fixtures identify a difference. Through n=30 there
+>   only later floor-active fixtures identify a difference. Through n=31 there
 >   are prospective rows but still zero floor-active rows: **NO_DECISION**.
 > - **Ensemble weight w = 0.6 model / 0.4 market — ADOPTED** (was 50:50).
 >   Unified ledger n=8: model Brier 0.1769 < market 0.1910; recomputed

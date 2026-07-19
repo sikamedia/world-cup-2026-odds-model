@@ -114,23 +114,23 @@ without independent evidence.
 
 ## Current checkpoint
 
-- KO results are current through Spain 2-0 France: n=29. The 90-minute RPS is
-  0.1478 and advancement Brier is 0.1604. The completed n=28 parameter review
+- KO results are current through France 4-6 England: n=31. The 90-minute RPS is
+  0.1544 and advancement Brier is 0.1646. The completed n=28 parameter review
   remains the frozen decision checkpoint.
-- The paired graded-minus-flat-1.00 Brier delta is +0.0036 with 95% CI
-  [-0.0044, +0.0116]. The n=28 gate is reached, but the interval crosses zero:
+- The paired graded-minus-flat-1.00 Brier delta is +0.0041 with 95% CI
+  [-0.0034, +0.0116]. The n=28 gate is reached, but the interval crosses zero:
   `NO_DECISION`; graded-k stays frozen. Flat 1.00's retrospective Brier of
-  0.1570 is a post-tournament calibration candidate, not a live change.
-- The floor shadow has four post-adoption prospective rows and zero floor-active
+  0.1605 is a post-tournament calibration candidate, not a live change.
+- The floor shadow has seven post-adoption prospective rows and zero floor-active
   rows. Its n=28 gate is reached without identifying evidence: `NO_DECISION`.
 - The draw-boost x floor interaction gate is reached. Its RPS interaction is
-  +0.00003, so the diagnostic state is `REVIEW_INTERACTION` but the measured
+  +0.00002, so the diagnostic state is `REVIEW_INTERACTION` but the measured
   effect is negligible and production parameters remain frozen.
-- The ensemble ledger has 11 eligible `live_current_elo` rows out of 13 total;
-  one `mixed_legacy` and one counterfactual row are excluded. The n=12 grid has
-  not run, current w=0.6 Brier is 0.1726, and the state is `HOLD_W_0_6`. One
-  further eligible settled row opens the diagnostic grid review, not an
-  automatic production refit.
+- The ensemble ledger has 12 eligible `live_current_elo` rows out of 15 total;
+  one `mixed_legacy`, one counterfactual, and one `post_policy_no_freeze` row are
+  excluded. The n=12 diagnostic grid has run: current w=0.6 Brier is 0.1863,
+  raw grid-best w=1.0 Brier is 0.1746, and the state is `REVIEW_REFIT`.
+  Production w=0.6 remains frozen pending a wider cross-tournament review.
 - The style ledger contains three observations across two fixtures, but zero
   formally eligible fixtures. Any reported "low-block side 4/4" sequence is a
   descriptive watch item, not evidence from the pre-registered style cohort.
