@@ -4,6 +4,37 @@ This document is the current decision policy for the remaining 2026 knockout
 matches. Historical daily reports remain immutable; corrections are recorded
 here and in the next generated report.
 
+## Versioning
+
+Three independent version tracks exist; do not conflate them.
+
+- **Parameter-regime label** (`v3.x`, next `v4.0`). Names the governed
+  scoring-parameter regime — the frozen `STAGE_PROFILES` values plus the ensemble
+  weight — and is used in the daily reports and `match_model.py` comments (v3.2
+  draw inflation, v3.4 fixes, v3.7A frozen group profile, v3.9 knockout
+  `lambda_floor=0.30` and graded-k). A *minor* increment records a single
+  parameter adoption that already cleared its pre-registered gate mid-cycle
+  (v3.7A to v3.9 adopted `lambda_floor` at n=16). A *major* increment marks a
+  tournament/cycle boundary: because in-tournament refits are forbidden, every
+  `REVIEW_REFIT`/`NO_DECISION` change candidate accumulates until the event ends
+  and is re-pre-registered for the next cycle as the next regime. That batch is
+  `v4.0`; it is a review label only until each item passes its own gate.
+- **Freeze engine string** (`predict_jul11._predict/v1`). The exact finalize
+  implementation and frozen parameter set bound into every governed ensemble
+  freeze and machine-verified by `summarize_ensemble_basis()` against
+  `ENSEMBLE_MODEL_ENGINE`. Changing it is itself a governance event — it
+  invalidates existing freezes and requires a new `/vN` with re-registration, not
+  a documentation edit — and it is independent of the regime label above.
+- **Package/release version** (`pyproject.toml`, currently `0.4.0rc1`). Repository
+  and skill-bundle packaging only. It tracks releases, not the model regime, and
+  moves on its own cadence.
+
+Current state (2026 wrap-up): the regime is frozen at v3.9 through the
+tournament; `v4.0` is an open review checklist (ensemble weight `w` increase, `k`
+flattening, a third-place/dead-rubber `avg_goals` tier) with every item still
+`REVIEW_REFIT` or `NO_DECISION` and nothing adopted. The freeze engine is
+`predict_jul11._predict/v1`; the package is `0.4.0rc1`.
+
 ## Tournament freeze
 
 - `graded-k`, knockout `lambda_floor=0.30`, `draw_boost=0.06`, and ensemble
