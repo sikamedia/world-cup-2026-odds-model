@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.9 bundle (KO n=31, third-place complete; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen; Final schema-4 fixture registered)
+# Football Odds Model — v3.9 bundle (KO n=32, tournament complete / final graded; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen; Final schema-4 artifact settled)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -53,10 +53,10 @@ description: >-
 >   **0.1733** vs flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all
 >   round — all 3 favourite exits were pens-after-draw (Ger +230, Ned +110,
 >   Aus +92), while every ΔElo≥232 favourite advanced in 90'. Live monitoring
->   through the third-place match (KO n=31): called 24/31, advancement Brier
->   **0.1646**, 90' RPS **0.1544**; reality LESS upset-heavy than the regressed
->   model (actual 90' upsets 7 vs 10.93 expected at k=0.70). Flat 1.00 is
->   retrospectively best on n=31 (Brier 0.1605), but remains MONITOR-ONLY,
+>   through the final (KO n=32): called 25/32, advancement Brier
+>   **0.1659**, 90' RPS **0.1532**; reality LESS upset-heavy than the regressed
+>   model (actual 90' upsets 7 vs 10.28 expected at k=0.70). Flat 1.00 is
+>   retrospectively best on n=32 (Brier 0.1615), but remains MONITOR-ONLY,
 >   not a refit.
 >   It spends the whole buffer (Argentina +495 was still dragged to 1-1 at
 >   90'). Auto-graded when `--elo` is given (prints k_eff); explicit
@@ -78,7 +78,7 @@ description: >-
 >   adv/RPS channels' small preference for 0.15 was survivor bias (Argentina
 >   advanced anyway; cost on adv Brier ~0.005). Group profile keeps 0.15
 >   (frozen). floor-0.15 remains a prospective SHADOW after the n=24 baseline;
->   only later floor-active fixtures identify a difference. Through n=31 there
+>   only later floor-active fixtures identify a difference. Through n=32 there
 >   are prospective rows but still zero floor-active rows: **NO_DECISION**.
 > - **Ensemble weight w = 0.6 model / 0.4 market — ADOPTED** (was 50:50).
 >   Unified ledger n=8: model Brier 0.1769 < market 0.1910; recomputed
@@ -86,15 +86,15 @@ description: >-
 >   `mixed_legacy` row from the stale-Elo/current-Elo transition. A refit must
 >   use only unique, settled `live_current_elo` rows and waits for eligible
 >   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. UPDATE
->   (post-3P, KO n=31): the third-place artifact (France-England, schema-4
->   `4ac75a42`) took the ledger to **12 eligible rows out of 15 total** (SF102
+>   (post-final, KO n=32): the third-place and final (F104) schema-4 artifacts
+>   took the ledger to **13 eligible rows out of 16 total** (SF102
 >   still fail-closed as `post_policy_no_freeze` — no compliant pre-match
 >   freeze). The gate is reached, so `summarize_ensemble_basis` now returns
 >   **REVIEW_REFIT** and computes the grid (raw best w=1.0). This is
 >   **REVIEW-ONLY: w stays frozen at 0.6** pending the refit decision — do NOT
 >   move w off 0.6 on this alone. A single-tournament, monotone grid pointing to
 >   pure model (w=1.0) is not sufficient to move w: a paired-Brier gap this
->   small over just 12 rows is within noise, and w=1.0 would contradict
+>   small over just 13 rows is within noise, and w=1.0 would contradict
 >   Discipline A (the market prices information the model cannot see). Refit
 >   only on a wider, cross-tournament sample. The two July 11
 >   QF preview rows remain eligible because `basis` records pre-match Elo input

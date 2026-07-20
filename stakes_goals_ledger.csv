@@ -30,6 +30,7 @@ date,stage,home,away,stakes_label,delta_elo,total_goals,over_2_5,margin,basis,no
 ,SF,France,Spain,competitive,-94,2,0,2,ko_stage,
 ,SF,England,Argentina,competitive,-91,3,1,1,ko_stage,
 ,3P,France,England,dead_rubber,39,10,1,2,ko_stage,
+,F,Spain,Argentina,competitive,42,0,0,0,ko_stage,
 ,group,Norway,France,dead_rubber,-183,5,1,3,competition_state,
 ,group,Senegal,Iraq,dead_rubber,260,5,1,5,competition_state,
 ,group,Spain,Saudi Arabia,one_sided,497,4,1,4,competition_state,

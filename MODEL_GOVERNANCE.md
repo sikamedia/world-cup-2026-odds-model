@@ -11,10 +11,12 @@ Three independent version tracks exist; do not conflate them.
 - **Parameter-regime label** (`v3.x`, next `v4.0`). Names the governed
   scoring-parameter regime — the frozen `STAGE_PROFILES` values plus the ensemble
   weight — and is used in the daily reports and `match_model.py` comments (v3.2
-  draw inflation, v3.4 fixes, v3.7A frozen group profile, v3.9 knockout
-  `lambda_floor=0.30` and graded-k). A *minor* increment records a single
-  parameter adoption that already cleared its pre-registered gate mid-cycle
-  (v3.7A to v3.9 adopted `lambda_floor` at n=16). A *major* increment marks a
+  draw inflation, v3.4 fixes, v3.7A frozen group profile, v3.8 knockout graded-k,
+  v3.9 knockout `lambda_floor=0.30` and ensemble `w=0.6`). A *minor* increment
+  records a governed adoption at a pre-registered review gate, and may adopt a
+  coherent set of parameters sharing that gate: v3.8 locked graded-k at n=16
+  (2026-07-04); v3.9 adopted both `lambda_floor=0.30` and `w=0.6` at the n=24
+  review (2026-07-08). A *major* increment marks a
   tournament/cycle boundary: because in-tournament refits are forbidden, every
   `REVIEW_REFIT`/`NO_DECISION` change candidate accumulates until the event ends
   and is re-pre-registered for the next cycle as the next regime. That batch is
@@ -29,10 +31,11 @@ Three independent version tracks exist; do not conflate them.
   and skill-bundle packaging only. It tracks releases, not the model regime, and
   moves on its own cadence.
 
-Current state (2026 wrap-up): the regime is frozen at v3.9 through the
-tournament; `v4.0` is an open review checklist (ensemble weight `w` increase, `k`
-flattening, a third-place/dead-rubber `avg_goals` tier) with every item still
-`REVIEW_REFIT` or `NO_DECISION` and nothing adopted. The freeze engine is
+Current state (2026 wrap-up): the regime is frozen at v3.9 for the completed
+tournament; `v4.0` is an open review checklist whose items sit in their own
+governed states — the ensemble weight `w` increase is `REVIEW_REFIT`, the `k`
+flattening is `NO_DECISION`, and the third-place/dead-rubber `avg_goals` tier is
+`MONITOR_ONLY` (below its n=12 gate) — none adopted. The freeze engine is
 `predict_jul11._predict/v1`; the package is `0.4.0rc1`.
 
 ## Tournament freeze
@@ -145,22 +148,22 @@ without independent evidence.
 
 ## Current checkpoint
 
-- KO results are current through France 4-6 England: n=31. The 90-minute RPS is
-  0.1544 and advancement Brier is 0.1646. The completed n=28 parameter review
-  remains the frozen decision checkpoint.
-- The paired graded-minus-flat-1.00 Brier delta is +0.0041 with 95% CI
-  [-0.0034, +0.0116]. The n=28 gate is reached, but the interval crosses zero:
+- KO results are current through Spain 1-0 Argentina (final): n=32. The 90-minute
+  RPS is 0.1532 and advancement Brier is 0.1659. The completed n=28 parameter
+  review remains the frozen decision checkpoint.
+- The paired graded-minus-flat-1.00 Brier delta is +0.0044 with 95% CI
+  [-0.0029, +0.0117]. The n=28 gate is reached, but the interval crosses zero:
   `NO_DECISION`; graded-k stays frozen. Flat 1.00's retrospective Brier of
-  0.1605 is a post-tournament calibration candidate, not a live change.
-- The floor shadow has seven post-adoption prospective rows and zero floor-active
+  0.1615 is a post-tournament calibration candidate, not a live change.
+- The floor shadow has eight post-adoption prospective rows and zero floor-active
   rows. Its n=28 gate is reached without identifying evidence: `NO_DECISION`.
 - The draw-boost x floor interaction gate is reached. Its RPS interaction is
   +0.00002, so the diagnostic state is `REVIEW_INTERACTION` but the measured
   effect is negligible and production parameters remain frozen.
-- The ensemble ledger has 12 eligible `live_current_elo` rows out of 15 total;
+- The ensemble ledger has 13 eligible `live_current_elo` rows out of 16 total;
   one `mixed_legacy`, one counterfactual, and one `post_policy_no_freeze` row are
-  excluded. The n=12 diagnostic grid has run: current w=0.6 Brier is 0.1863,
-  raw grid-best w=1.0 Brier is 0.1746, and the state is `REVIEW_REFIT`.
+  excluded. The n=12 diagnostic grid has run: current w=0.6 Brier is 0.1872,
+  raw grid-best w=1.0 Brier is 0.1778, and the state is `REVIEW_REFIT`.
   Production w=0.6 remains frozen pending a wider cross-tournament review.
 - The style ledger contains three observations across two fixtures, but zero
   formally eligible fixtures. Any reported "low-block side 4/4" sequence is a
