@@ -4,6 +4,40 @@ This document is the current decision policy for the remaining 2026 knockout
 matches. Historical daily reports remain immutable; corrections are recorded
 here and in the next generated report.
 
+## Versioning
+
+Three independent version tracks exist; do not conflate them.
+
+- **Parameter-regime label** (`v3.x`, next `v4.0`). Names the governed
+  scoring-parameter regime — the frozen `STAGE_PROFILES` values plus the ensemble
+  weight — and is used in the daily reports and `match_model.py` comments (v3.2
+  draw inflation, v3.4 fixes, v3.7A frozen group profile, v3.8 knockout graded-k,
+  v3.9 knockout `lambda_floor=0.30` and ensemble `w=0.6`). A *minor* increment
+  records a governed adoption at a pre-registered review gate, and may adopt a
+  coherent set of parameters sharing that gate: v3.8 locked graded-k at n=16
+  (2026-07-04); v3.9 adopted both `lambda_floor=0.30` and `w=0.6` at the n=24
+  review (2026-07-08). A *major* increment marks a
+  tournament/cycle boundary: because in-tournament refits are forbidden, every
+  `REVIEW_REFIT`/`NO_DECISION` change candidate accumulates until the event ends
+  and is re-pre-registered for the next cycle as the next regime. That batch is
+  `v4.0`; it is a review label only until each item passes its own gate.
+- **Freeze engine string** (`predict_jul11._predict/v1`). The exact finalize
+  implementation and frozen parameter set bound into every governed ensemble
+  freeze and machine-verified by `summarize_ensemble_basis()` against
+  `ENSEMBLE_MODEL_ENGINE`. Changing it is itself a governance event — it
+  invalidates existing freezes and requires a new `/vN` with re-registration, not
+  a documentation edit — and it is independent of the regime label above.
+- **Package/release version** (`pyproject.toml`, currently `0.4.0rc1`). Repository
+  and skill-bundle packaging only. It tracks releases, not the model regime, and
+  moves on its own cadence.
+
+Current state (2026 wrap-up): the regime is frozen at v3.9 for the completed
+tournament; `v4.0` is an open review checklist whose items sit in their own
+governed states — the ensemble weight `w` increase is `REVIEW_REFIT`, the `k`
+flattening is `NO_DECISION`, and the third-place/dead-rubber `avg_goals` tier is
+`MONITOR_ONLY` (below its n=12 gate) — none adopted. The freeze engine is
+`predict_jul11._predict/v1`; the package is `0.4.0rc1`.
+
 ## Tournament freeze
 
 - `graded-k`, knockout `lambda_floor=0.30`, `draw_boost=0.06`, and ensemble
@@ -114,23 +148,23 @@ without independent evidence.
 
 ## Current checkpoint
 
-- KO results are current through Spain 2-0 France: n=29. The 90-minute RPS is
-  0.1478 and advancement Brier is 0.1604. The completed n=28 parameter review
-  remains the frozen decision checkpoint.
-- The paired graded-minus-flat-1.00 Brier delta is +0.0036 with 95% CI
-  [-0.0044, +0.0116]. The n=28 gate is reached, but the interval crosses zero:
+- KO results are current through Spain 1-0 Argentina (final): n=32. The 90-minute
+  RPS is 0.1532 and advancement Brier is 0.1659. The completed n=28 parameter
+  review remains the frozen decision checkpoint.
+- The paired graded-minus-flat-1.00 Brier delta is +0.0044 with 95% CI
+  [-0.0029, +0.0117]. The n=28 gate is reached, but the interval crosses zero:
   `NO_DECISION`; graded-k stays frozen. Flat 1.00's retrospective Brier of
-  0.1570 is a post-tournament calibration candidate, not a live change.
-- The floor shadow has four post-adoption prospective rows and zero floor-active
+  0.1615 is a post-tournament calibration candidate, not a live change.
+- The floor shadow has eight post-adoption prospective rows and zero floor-active
   rows. Its n=28 gate is reached without identifying evidence: `NO_DECISION`.
 - The draw-boost x floor interaction gate is reached. Its RPS interaction is
-  +0.00003, so the diagnostic state is `REVIEW_INTERACTION` but the measured
+  +0.00002, so the diagnostic state is `REVIEW_INTERACTION` but the measured
   effect is negligible and production parameters remain frozen.
-- The ensemble ledger has 11 eligible `live_current_elo` rows out of 13 total;
-  one `mixed_legacy` and one counterfactual row are excluded. The n=12 grid has
-  not run, current w=0.6 Brier is 0.1726, and the state is `HOLD_W_0_6`. One
-  further eligible settled row opens the diagnostic grid review, not an
-  automatic production refit.
+- The ensemble ledger has 13 eligible `live_current_elo` rows out of 16 total;
+  one `mixed_legacy`, one counterfactual, and one `post_policy_no_freeze` row are
+  excluded. The n=12 diagnostic grid has run: current w=0.6 Brier is 0.1872,
+  raw grid-best w=1.0 Brier is 0.1778, and the state is `REVIEW_REFIT`.
+  Production w=0.6 remains frozen pending a wider cross-tournament review.
 - The style ledger contains three observations across two fixtures, but zero
   formally eligible fixtures. Any reported "low-block side 4/4" sequence is a
   descriptive watch item, not evidence from the pre-registered style cohort.

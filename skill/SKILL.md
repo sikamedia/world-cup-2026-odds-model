@@ -14,7 +14,7 @@ description: >-
   never gives betting advice.
 ---
 
-# Football Odds Model — v3.9 bundle (KO n=29; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen)
+# Football Odds Model — v3.9 bundle (KO n=32, tournament complete / final graded; n=28 review complete; λ-floor 0.30, ensemble w=0.6, and graded-k frozen; Final schema-4 artifact settled)
 
 中文：这是一个从博彩公司定价视角出发的足球比赛分析 skill。它用于估算胜平负、
 正确比分、大小球、BTTS、让球、锦标赛晋级/冠军概率，以及对比模型概率和市场
@@ -53,10 +53,11 @@ description: >-
 >   **0.1733** vs flat-0.70's 0.1808, called 13/16; ZERO 90-minute upsets all
 >   round — all 3 favourite exits were pens-after-draw (Ger +230, Ned +110,
 >   Aus +92), while every ΔElo≥232 favourite advanced in 90'. Live monitoring
->   through 2026-07-12 (KO n=28): called 22/28, advancement Brier **0.1606**,
->   90' RPS **0.1472**, actual upsets 6 vs model-expected 8.59. Flat 1.00 is
->   retrospectively best on n=28 (Brier 0.1570), but remains MONITOR-ONLY, not
->   a refit.
+>   through the final (KO n=32): called 25/32, advancement Brier
+>   **0.1659**, 90' RPS **0.1532**; reality LESS upset-heavy than the regressed
+>   model (actual 90' upsets 7 vs 10.28 expected at k=0.70). Flat 1.00 is
+>   retrospectively best on n=32 (Brier 0.1615), but remains MONITOR-ONLY,
+>   not a refit.
 >   It spends the whole buffer (Argentina +495 was still dragged to 1-1 at
 >   90'). Auto-graded when `--elo` is given (prints k_eff); explicit
 >   `--ko-regress` overrides; falls back to flat 0.70 without Elo input. Output
@@ -77,15 +78,25 @@ description: >-
 >   adv/RPS channels' small preference for 0.15 was survivor bias (Argentina
 >   advanced anyway; cost on adv Brier ~0.005). Group profile keeps 0.15
 >   (frozen). floor-0.15 remains a prospective SHADOW after the n=24 baseline;
->   only later floor-active fixtures identify a difference. At n=28 there are
->   four prospective rows but zero floor-active rows: **NO_DECISION**.
+>   only later floor-active fixtures identify a difference. Through n=32 there
+>   are prospective rows but still zero floor-active rows: **NO_DECISION**.
 > - **Ensemble weight w = 0.6 model / 0.4 market — ADOPTED** (was 50:50).
 >   Unified ledger n=8: model Brier 0.1769 < market 0.1910; recomputed
 >   current-Elo 50:50 ensemble 0.1834. The CSV `p_ensemble` column contains one
 >   `mixed_legacy` row from the stale-Elo/current-Elo transition. A refit must
 >   use only unique, settled `live_current_elo` rows and waits for eligible
->   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. At current
->   n=29 the ledger has 11 eligible rows out of 13 total: **HOLD_W_0_6**. The two July 11
+>   n>=12; then report the 0.0..1.0 model-weight grid in 0.1 steps. UPDATE
+>   (post-final, KO n=32): the third-place and final (F104) schema-4 artifacts
+>   took the ledger to **13 eligible rows out of 16 total** (SF102
+>   still fail-closed as `post_policy_no_freeze` — no compliant pre-match
+>   freeze). The gate is reached, so `summarize_ensemble_basis` now returns
+>   **REVIEW_REFIT** and computes the grid (raw best w=1.0). This is
+>   **REVIEW-ONLY: w stays frozen at 0.6** pending the refit decision — do NOT
+>   move w off 0.6 on this alone. A single-tournament, monotone grid pointing to
+>   pure model (w=1.0) is not sufficient to move w: a paired-Brier gap this
+>   small over just 13 rows is within noise, and w=1.0 would contradict
+>   Discipline A (the market prices information the model cannot see). Refit
+>   only on a wider, cross-tournament sample. The two July 11
 >   QF preview rows remain eligible because `basis` records pre-match Elo input
 >   quality, not the existence of an official finalization artifact.
 >   The 11 live fixtures through France-Spain are explicitly grandfathered;
@@ -392,14 +403,16 @@ Run from the skill directory (numpy needed only for the Monte Carlo;
   ratings; official finalization never accepts Elo more than 30 minutes after
   response completion.
 - `python predict_jul11.py finalize --fixture
-  {norway-england,argentina-switzerland,france-spain,england-argentina}
+  {norway-england,argentina-switzerland,france-spain,england-argentina,france-england,spain-argentina}
   --elo-module <elo.py> --elo-source-tsv <World.tsv> --elo-receipt
   <receipt.json> --context-file <context.json> --artifact-out <final.json>`
   finalizes exactly one pre-kickoff knockout match into a create-only hashed
   `pre_registered_match_prediction` artifact with its direct-HTTP receipt and
   stage recorded, using frozen w=0.6 model / 0.4 market. QF/SF remains schema 3;
-  schema 4 activates only for third-place/final after SF102 settles and the real
-  fixtures are registered. A direct
+  schema 4 is now active for the registered third-place/final fixtures
+  (3P103 France-England 2026-07-18 21:00Z Hard Rock Miami, F104 Spain-Argentina
+  2026-07-19 19:00Z MetLife, both open-air → outdoor weather path mandatory).
+  A direct
   two-way advancement market is preferred; otherwise the artifact explicitly
   marks the 90-minute-market fallback. The reader remains compatible with
   schemas 1-4 at their permitted stages.
